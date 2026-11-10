@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatClock } from '@/lib/time.ts';
+import { formatClock, inputToMinute as fromTimeInput, minuteToInput as toTimeInput } from '@/lib/time.ts';
 import type { AlertPrefs, DailyWatch } from '@/lib/types.ts';
 import type { Settings } from './useSettings';
 
-const ALERTS: { key: keyof AlertPrefs; label: string; hint: string }[] = [
-  { key: 'leave', label: 'Time to leave', hint: 'While watching' },
-  { key: 'atStop', label: 'Bus at my stop', hint: 'While watching' },
+const ALERTS: { key: keyof AlertPrefs; label: string; hint: string; planHint?: string }[] = [
+  { key: 'leave', label: 'Time to leave', hint: 'While watching', planHint: 'For each planned bus, and while watching' },
+  { key: 'atStop', label: 'Bus at my stop', hint: 'While watching', planHint: 'For each planned bus, and while watching' },
   { key: 'notRunning', label: 'Not running', hint: 'Always' },
   { key: 'firstLast', label: 'First and last bus', hint: 'Always' },
 ];
@@ -21,15 +21,6 @@ function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
 }
 
-function toTimeInput(minute: number): string {
-  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
-}
-
-function fromTimeInput(value: string): number {
-  const [hours, minutes] = value.split(':').map(Number);
-  return hours * 60 + minutes;
-}
-
 type Support = 'checking' | 'ready' | 'install' | 'unsupported';
 
 function detectSupport(): Support {
@@ -41,8 +32,15 @@ function detectSupport(): Support {
   return 'serviceWorker' in navigator && 'PushManager' in window ? 'ready' : 'unsupported';
 }
 
-export default function AlertsPanel({ settings, hasStops }: { settings: Settings; hasStops: boolean }) {
-  const { view, error, setError, update, setView, passcode, setPasscode } = settings;
+type Props = {
+  settings: Settings;
+  hasStops: boolean;
+  /** Today's plan is driving the alerts, so watching by hand is only for extra trips. */
+  planning: boolean;
+};
+
+export default function AlertsPanel({ settings, hasStops, planning }: Props) {
+  const { view, error, setError, update, setView } = settings;
   const [support, setSupport] = useState<Support>('checking');
   const [busy, setBusy] = useState(false);
 
@@ -99,13 +97,6 @@ export default function AlertsPanel({ settings, hasStops }: { settings: Settings
     <section className="section" aria-labelledby="alerts-title">
       <h2 id="alerts-title">Alerts</h2>
 
-      {view.passcodeRequired && (
-        <label className="field">
-          <span>Passcode</span>
-          <input type="password" autoComplete="off" value={passcode} onChange={(e) => setPasscode(e.target.value)} />
-        </label>
-      )}
-
       {support === 'install' && (
         <p className="callout">
           To get alerts on iPhone, tap Share in Safari, then <strong>Add to Home Screen</strong>, and open Shuttle from there.
@@ -142,7 +133,9 @@ export default function AlertsPanel({ settings, hasStops }: { settings: Settings
           <p className="note">
             {watchActive
               ? `Until ${formatClock(view.watchUntil!)}.`
-              : 'Leave and arrival alerts only fire while watching, so a loop every half hour stays quiet.'}
+              : planning
+                ? 'Your planned buses alert on their own. Watch for a trip that is not in the plan.'
+                : 'Leave and arrival alerts only fire while watching, so a loop every half hour stays quiet.'}
           </p>
         </div>
         <button
@@ -180,11 +173,11 @@ export default function AlertsPanel({ settings, hasStops }: { settings: Settings
 
       <fieldset className="group">
         <legend>Send me</legend>
-        {ALERTS.map(({ key, label, hint }) => (
+        {ALERTS.map(({ key, label, hint, planHint }) => (
           <label className="toggle" key={key}>
             <span>
               {label}
-              <small>{hint}</small>
+              <small>{planning && planHint ? planHint : hint}</small>
             </span>
             <input
               type="checkbox"

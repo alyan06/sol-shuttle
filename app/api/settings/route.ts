@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { expectedServiceEnd, isWatching } from '@/lib/alerts.ts';
+import { allowed, passcodeRequired } from '@/lib/auth.ts';
 import { pushConfigured, sendPush } from '@/lib/push.ts';
 import { load, save, type PushSubscriptionJson } from '@/lib/store.ts';
 import { tempeWeekday } from '@/lib/time.ts';
@@ -17,11 +18,6 @@ type Change = {
   test?: boolean;
 };
 
-function allowed(request: Request): boolean {
-  const passcode = process.env.APP_PASSCODE;
-  return !passcode || request.headers.get('x-passcode') === passcode;
-}
-
 async function view(endpoint: string | null) {
   const [settings, tracking] = await Promise.all([load('settings'), load('tracking')]);
   const now = Date.now();
@@ -31,7 +27,7 @@ async function view(endpoint: string | null) {
     watching: isWatching(now, settings.watchUntil, settings.prefs.dailyWatch),
     subscribed: endpoint ? settings.subscriptions.some((s) => s.endpoint === endpoint) : false,
     pushKey: pushConfigured() ? process.env.VAPID_PUBLIC_KEY : null,
-    passcodeRequired: Boolean(process.env.APP_PASSCODE),
+    passcodeRequired: passcodeRequired(),
     serviceEndMinute: expectedServiceEnd(tracking, tempeWeekday(now)),
   };
 }
@@ -39,6 +35,8 @@ async function view(endpoint: string | null) {
 export type SettingsView = Awaited<ReturnType<typeof view>>;
 
 export async function GET(request: Request) {
+  // Settings say where and when one person catches the bus, so reading them needs the passcode too.
+  if (!allowed(request)) return NextResponse.json({ error: 'locked' }, { status: 401 });
   return NextResponse.json(await view(new URL(request.url).searchParams.get('endpoint')));
 }
 

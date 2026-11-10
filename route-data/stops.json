@@ -1,4 +1,4 @@
 [
   { "id": "sol", "name": "SoL", "lat": 33.42134, "lng": -111.90222, "heading": 180, "holdM": 380 },
-  { "id": "asu-forest", "name": "ASU, Forest Ave", "lat": 33.41715, "lng": -111.93655, "heading": 0 }
+  { "id": "gammage", "name": "Gammage", "lat": 33.41715, "lng": -111.93655, "heading": 0 }
 ]

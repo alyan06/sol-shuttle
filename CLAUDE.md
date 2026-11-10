@@ -20,9 +20,9 @@ npm run tick:local  # runs the alert check every 30s against the dev server
 
 ## What the bus actually does (measured 2026-11-06, Friday evening)
 
-- One loop takes about 35 min and covers 9.2 km: SoL → University west → McClintock south → Apache west → Forest north (ASU stop) → turnaround → Forest south → Apache east → McClintock north → University east → around the back of SoL.
+- One loop takes about 35 min and covers 9.2 km: SoL → University west → McClintock south → Apache west → Forest north (the Gammage stop) → turnaround → Forest south → Apache east → McClintock north → University east → around the back of SoL.
 - One of the first loops went University → Rural → Apache instead. The app shows "Off route" with no time on that leg.
-- The loop has slack and the driver spends it in different places: 20s to 5 min at ASU, 1 to 5 min at the Apache/McClintock light, 3 to 11 min at SoL. That's the limit on ETA accuracy, and why an ETA can drop by minutes at once. Don't treat the leave alert as a moment; it's a threshold.
+- The loop has slack and the driver spends it in different places: 20s to 5 min at Gammage, 1 to 5 min at the Apache/McClintock light, 3 to 11 min at SoL. That's the limit on ETA accuracy, and why an ETA can drop by minutes at once. Don't treat the leave alert as a moment; it's a threshold.
 - The bus waits at SoL for minutes, in up to three spots: the east driveway, the back of the property, and the University Dr curb. Which one riders board at isn't known yet, so the SoL stop starts at the driveway and `holdM` keeps "Bus is here" on until it leaves the curb. `canCatch` counts the wait.
 
 ## Live (deployed 2026-11-07)

@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev -p 3240",
+    "dev": "node scripts/dev-local.mjs",
     "build": "next build",
     "start": "next start -p 3240",
     "test": "node --test \"lib/**/*.test.ts\"",
     "learn": "node scripts/learn-route.mjs",
     "record": "node --env-file=.env.local scripts/record-route.mjs",
     "tick:local": "node scripts/tick-loop.mjs",
-    "postinstall": "node scripts/copy-map-worker.mjs"
+    "postinstall": "node scripts/copy-map-worker.mjs",
+    "dev:locked": "node scripts/dev-local.mjs --passcode letmein",
+    "dev:hosted": "next dev -p 3240"
   },
   "dependencies": {
     "maplibre-gl": "^6.16.0",

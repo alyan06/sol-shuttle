@@ -76,6 +76,7 @@ export type AlertState = {
 };
 
 export type AlertKind =
+  | 'plan'
   | 'leave'
   | 'arrived'
   | 'departed'
@@ -85,3 +86,84 @@ export type AlertKind =
   | 'last-loop';
 
 export type AlertEvent = { kind: AlertKind; title: string; body: string };
+
+/** One stop visit in a day's log. Times are seconds after midnight in Tempe; null = not observed. */
+export type Visit = { stop: string; arr: number | null; dep: number | null };
+
+export type DayLog = {
+  day: string;
+  weekday: number;
+  firstMove: number | null;
+  lastMove: number | null;
+  visits: Visit[];
+  /** Logging began after service had started, so firstMove isn't the real first bus. */
+  partial?: true;
+};
+
+export type History = { days: DayLog[] };
+
+/** A run that recurs at about the same time: typical, earliest and latest arrival seen. */
+export type TimetableSlot = { sec: number; early: number; late: number };
+
+export type Timetable = {
+  weekday: number;
+  daysSeen: number;
+  /** Whether the bus runs on this weekday. Null until enough days are seen. */
+  runs: boolean | null;
+  firstSec: number | null;
+  /** Earliest end of service seen, when the bus parks for the night. */
+  lastSec: number | null;
+  lastSure: boolean;
+  arrivals: Record<string, TimetableSlot[]>;
+};
+
+export type Place = { id: string; name: string; lat: number; lng: number };
+
+/** A class meeting. Times are minutes after midnight in Tempe. */
+export type ClassBlock = { id: string; course: string; placeId: string; room?: string; startMin: number; endMin: number };
+
+export type Pattern = { id: string; name: string; days: number[]; classes: ClassBlock[] };
+
+export type AfterClass = 'gym' | 'home';
+export type Evening = 'bus' | 'walk' | 'skip';
+
+export type GymPlan = {
+  days: number[];
+  workoutMin: number;
+  /** Usual choice after the last class on a gym day. */
+  afterClass: AfterClass;
+  /** Usual way to get to the gym after going home first, or on a day with no classes. */
+  evening: Evening;
+  eveningLeaveMin: number;
+};
+
+/** Today's one-off choices. Ignored once the date changes. */
+export type DayOverride = {
+  date: string;
+  skipped: string[];
+  afterClass?: AfterClass;
+  evening?: Evening;
+  eveningLeaveMin?: number;
+  /** Left campus early from this place at this time. */
+  leftAt?: number;
+  leftPlaceId?: string;
+  gymDoneAt?: number;
+  /** "Plan again from now": buses committed to before this are forgotten. */
+  replanAt?: number;
+};
+
+export type Schedule = {
+  places: Place[];
+  patterns: Pattern[];
+  gym: GymPlan;
+  /** Minutes to be in the room before class starts. */
+  arriveEarlyMin: number;
+  /** Walking pace in metres a minute. */
+  paceMPerMin: number;
+  /** Walk minutes that replace the estimate, keyed by the two place ids sorted and joined with "|". */
+  walkOverrides: Record<string, number>;
+  override: DayOverride | null;
+};
+
+/** Bus legs taken as boarded once their bus has come, so the plan doesn't jump to the next bus. */
+export type Progress = { date: string; boarded: Record<string, { at: number; arrive: number; since: number }> };

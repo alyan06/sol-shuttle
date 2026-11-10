@@ -1,7 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { defaultPrefs, initialAlertState } from './alerts.ts';
-import type { AlertState, Ping, Prefs } from './types.ts';
+import { emptyHistory } from './history.ts';
+import { defaultSchedule } from './schedule.ts';
+import type { AlertState, DayLog, History, Ping, Prefs, Progress, Schedule } from './types.ts';
 
 export type PushSubscriptionJson = {
   endpoint: string;
@@ -15,11 +17,22 @@ export type Settings = {
 };
 
 /** Held apart from Settings so the background tick and the app never overwrite each other. */
-export type Tracking = AlertState & { lastPing: Ping | null };
+export type Tracking = AlertState & {
+  lastPing: Ping | null;
+  /** Today's bus log, filed into history when the date changes. */
+  today: DayLog | null;
+  progress: Progress | null;
+  /** The stop the leave and arrival alerts are currently about. */
+  alertStopId: string | null;
+  /** Plan alerts already sent today, as "date:id". */
+  planFired: string[];
+};
 
-const DEFAULTS: { settings: Settings; tracking: Tracking } = {
+const DEFAULTS: { settings: Settings; tracking: Tracking; history: History; schedule: Schedule } = {
   settings: { prefs: defaultPrefs, watchUntil: null, subscriptions: [] },
-  tracking: { ...initialAlertState, lastPing: null },
+  tracking: { ...initialAlertState, lastPing: null, today: null, progress: null, alertStopId: null, planFired: [] },
+  history: emptyHistory,
+  schedule: defaultSchedule,
 };
 
 type Key = keyof typeof DEFAULTS;
@@ -74,4 +87,16 @@ export async function load<K extends Key>(key: K): Promise<Value<K>> {
 export async function save<K extends Key>(key: K, value: Value<K>) {
   const db = supabase();
   await (db ? remotePut(db, key, value) : filePut(key, value));
+  cache.delete(key);
+}
+
+const cache = new Map<Key, { at: number; value: unknown }>();
+
+/** For rows that change rarely (history grows once a day): skips the read while a recent copy is held. */
+export async function loadCached<K extends Key>(key: K, maxAgeMs: number): Promise<Value<K>> {
+  const held = cache.get(key);
+  if (held && Date.now() - held.at < maxAgeMs) return held.value as Value<K>;
+  const value = await load(key);
+  cache.set(key, { at: Date.now(), value });
+  return value;
 }
