@@ -1,0 +1,6 @@
+.env*
+.data
+.next
+node_modules
+route-data
+*.tsbuildinfo
