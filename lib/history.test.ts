@@ -58,6 +58,19 @@ describe('recordObservation', () => {
     assert.equal(today.visits[0].dep, null);
   });
 
+  it('logs a stop the bus went through between two checks', () => {
+    // Seen live: a 20 second stop at Gammage fell between two 30 second checks and went unlogged.
+    const looped: Route = { ...route, path: [{ lat: 0, lng: 0, s: 0, t: 0 }, { lat: 0, lng: 0, s: 9000, t: 2100 }], stops: route.stops.map((s) => ({ ...s, s: s.id === 'gammage' ? 4000 : 8600 })) };
+    const moving = (now: number, s: number): Snapshot => ({ ...snap(now, null), located: { s, t: 0, offsetM: 0 } });
+    let today = recordObservation(null, moving(MON_8AM, 3700), looped, false, null).today;
+    today = recordObservation(today, moving(MON_8AM + 30_000, 4300), looped, false, 3700).today;
+    assert.deepEqual(today.visits, [{ stop: 'gammage', arr: 8 * 3600 + 30, dep: 8 * 3600 + 30 }]);
+    // Carrying on down the road adds nothing, and neither does a jump too big to be one drive.
+    today = recordObservation(today, moving(MON_8AM + 60_000, 4900), looped, false, 4300).today;
+    today = recordObservation(today, moving(MON_8AM + 90_000, 8900), looped, false, 4900).today;
+    assert.equal(today.visits.length, 1);
+  });
+
   it('hands back the finished day when the date changes', () => {
     const monday = replay([[0, null]]);
     const next = recordObservation(monday, snap(MON_8AM + 24 * 60 * MIN, 'sol'), route);

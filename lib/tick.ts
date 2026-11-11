@@ -27,7 +27,7 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
 
   // The bus's own history, for learning its timetable.
   const startedBeforeLogging = tracking.today === null && tracking.firstBusDay === date;
-  const { today, finished } = recordObservation(tracking.today, snapshot, route, startedBeforeLogging);
+  const { today, finished } = recordObservation(tracking.today, snapshot, route, startedBeforeLogging, tracking.prevS);
   if (finished) await save('history', appendDay(await load('history'), finished));
 
   // Today's plan: which bus is being caught, and the pushes for the moments to leave.
