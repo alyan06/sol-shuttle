@@ -25,6 +25,9 @@ const SERVICE_SLACK_MS = 5 * MIN;
 const LATE_START_MS = 10 * MIN;
 /** A leg still waiting on a bus time this long after it could have begun is over. */
 const GIVE_UP_MS = 3 * 60 * MIN;
+const NOTE_LATER = 'The bus time shows up about an hour before.';
+/** The leg is due but the bus isn't reporting, so "later" would be the wrong thing to say. */
+const NOTE_SILENT = 'No live bus time right now. Check the map before you set off.';
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export type LiveBus = { status: FeedStatus; etas: StopEta[]; parked: boolean } | null;
@@ -201,7 +204,8 @@ function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number |
       return { legs: [leg], arrive: null };
     }
     const notBefore = o.deadline === null ? o.readyAt : o.deadline - ride - walkHome * MIN - loop;
-    return { legs: [{ ...base, start: null, end: null, notBefore, note: 'The bus time shows up about an hour before.', ...(canWalk ? { walkInstead } : {}) }], arrive: null };
+    const note = notBefore <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
+    return { legs: [{ ...base, start: null, end: null, notBefore, note, ...(canWalk ? { walkInstead } : {}) }], arrive: null };
   }
 
   const late = o.deadline !== null && pick.arrive + pick.bus.plusMinus * 1000 > o.deadline;
@@ -251,7 +255,8 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number }): T
       return { legs: [leg], arrive: leg.end };
     }
     const atLeast = earliest + walkToStop * MIN + ride + walkHome * MIN;
-    return { legs: [{ ...base, start: null, end: null, notBefore: o.readyAt, note: 'The bus time shows up about an hour before.', walkInstead }], arrive: null, atLeast };
+    const note = o.readyAt <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
+    return { legs: [{ ...base, start: null, end: null, notBefore: o.readyAt, note, walkInstead }], arrive: null, atLeast };
   }
 
   const end = pick.arrive + walkHome * MIN;

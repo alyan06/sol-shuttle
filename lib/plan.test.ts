@@ -321,6 +321,13 @@ describe('planAnswer', () => {
     assert.match(a.detail, /To walk instead, leave by 12:35 PM/);
   });
 
+  it('does not say "later" for a ride that is due while the bus is silent', () => {
+    // Thursday 2:50 PM, class over at 2:45, no live bus.
+    const a = planAnswer(plan(T(14, 50, 3), null, { day: 3 }), route, T(14, 50, 3))!;
+    assert.equal(a.headline, 'No time yet');
+    assert.match(a.detail, /No live bus time right now/);
+  });
+
   it('is empty once the day is done', () => {
     assert.equal(planAnswer(plan(T(21, 0, 3), null, { day: 3 }), route, T(21, 0, 3)), null);
   });

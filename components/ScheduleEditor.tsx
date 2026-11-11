@@ -18,19 +18,23 @@ const PACES = [
 /** Roughly the Tempe campus, so a building search can't wander off to another city. */
 const CAMPUS_BOX = '-111.946,33.4275,-111.924,33.4105';
 
-type Found = { name: string; lat: number; lng: number };
+type Found = { name: string; where: string; lat: number; lng: number };
 
 const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 
 async function findBuilding(query: string): Promise<Found[]> {
   const pasted = query.match(/^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/);
-  if (pasted) return [{ name: 'Pasted location', lat: Number(pasted[1]), lng: Number(pasted[2]) }];
+  if (pasted) return [{ name: 'Pasted location', where: '', lat: Number(pasted[1]), lng: Number(pasted[2]) }];
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.search = new URLSearchParams({ q: query, format: 'json', limit: '5', viewbox: CAMPUS_BOX, bounded: '1' }).toString();
   const res = await fetch(url);
   if (!res.ok) throw new Error(String(res.status));
   const rows = (await res.json()) as { display_name: string; lat: string; lon: string }[];
-  return rows.map((row) => ({ name: row.display_name.split(',').slice(0, 2).join(','), lat: Number(row.lat), lng: Number(row.lon) }));
+  return rows.map((row) => {
+    // "Hayden Library, 300, East Orange Mall, Tempe, ...": the name, then the street past any house number.
+    const [name, ...rest] = row.display_name.split(',').map((part) => part.trim());
+    return { name, where: rest.find((part) => !/^\d+$/.test(part)) ?? '', lat: Number(row.lat), lng: Number(row.lon) };
+  });
 }
 
 function DayPicker({ label, days, onChange }: { label: string; days: number[]; onChange: (days: number[]) => void }) {
@@ -155,7 +159,7 @@ export default function ScheduleEditor({ route }: { route: Route }) {
   }
 
   function addPlace(hit: Found) {
-    const place: Place = { id: newId('p'), name: newName.trim() || hit.name.split(',')[0], lat: hit.lat, lng: hit.lng };
+    const place: Place = { id: newId('p'), name: newName.trim() || hit.name, lat: hit.lat, lng: hit.lng };
     edit({ places: [...schedule!.places, place] });
     setFound(null);
     setQuery('');
@@ -284,6 +288,7 @@ export default function ScheduleEditor({ route }: { route: Route }) {
               <li key={`${hit.lat},${hit.lng}`}>
                 <button type="button" className="button" onClick={() => addPlace(hit)}>
                   Add {hit.name}
+                  {hit.where && <small> on {hit.where}</small>}
                 </button>
               </li>
             ))}
