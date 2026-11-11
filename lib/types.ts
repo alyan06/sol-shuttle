@@ -46,6 +46,8 @@ export type Snapshot = {
 
 export type AlertPrefs = {
   leave: boolean;
+  /** After each class: the bus home, when one can be caught soon. Missing on older saves means on. */
+  afterClass?: boolean;
   atStop: boolean;
   notRunning: boolean;
   firstLast: boolean;
@@ -157,6 +159,10 @@ export type DayOverride = {
   gymDoneAt?: number;
   /** "Plan again from now": buses committed to before this are forgotten. */
   replanAt?: number;
+  /** Classes that let out early today, by class id, and when. */
+  outEarly?: Record<string, number>;
+  /** Minutes on foot to the campus stop from where the phone last was. Only the minutes are kept, never the place. */
+  here?: { walkMin: number; at: number };
 };
 
 export type Schedule = {

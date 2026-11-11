@@ -8,11 +8,12 @@ import type { ShuttleResponse } from '@/app/api/shuttle/route';
 import { defaultPrefs, parkedUp } from '@/lib/alerts.ts';
 import { answerFor } from '@/lib/answer.ts';
 import { advanceProgress, planAnswer, planDay } from '@/lib/plan.ts';
-import { hasClasses } from '@/lib/schedule.ts';
+import { CAMPUS, HERE_MAX_WALK_MIN, hasClasses, stopWalkMinutes } from '@/lib/schedule.ts';
 import { formatClock, formatSince, tempeDayKey } from '@/lib/time.ts';
 import type { Progress, Route, Schedule } from '@/lib/types.ts';
 import AlertsPanel from './AlertsPanel';
 import Timeline, { type OverrideChange } from './Timeline';
+import { useHere } from './useHere';
 import { useSettings } from './useSettings';
 
 const ShuttleMap = dynamic(() => import('./ShuttleMap'), {
@@ -21,6 +22,9 @@ const ShuttleMap = dynamic(() => import('./ShuttleMap'), {
 });
 
 const POLL_MS = 15_000;
+const MIN = 60_000;
+/** A walk reading is sent again this often while it hasn't changed, to keep it fresh for the alerts. */
+const HERE_RESEND_MS = 4 * MIN;
 
 type Fetched = { body: ShuttleResponse; requestedAt: number };
 
@@ -122,6 +126,9 @@ export default function Tracker({ route }: { route: Route }) {
   const schedule = local && fetched && local.at > fetched.requestedAt ? local.schedule : serverSchedule;
   const scheduleRef = useRef(schedule);
   scheduleRef.current = schedule;
+  // Saves go one at a time: each one reads today's choices, adds to them and writes them back, so
+  // two at once (a tap and a location reading, say) could drop one of them.
+  const saving = useRef<Promise<unknown>>(Promise.resolve());
 
   const changeToday = useCallback(
     async (change: OverrideChange) => {
@@ -131,7 +138,7 @@ export default function Tracker({ route }: { route: Route }) {
       const today = current.override?.date === date ? current.override : { date, skipped: [] };
       setLocal({ schedule: { ...current, override: change === null ? null : { ...today, ...change } }, at: Date.now() });
       setPlanError(null);
-      try {
+      const send = async () => {
         const body: PlanChange = { override: change };
         const res = await fetch('/api/plan', {
           method: 'POST',
@@ -139,7 +146,13 @@ export default function Tracker({ route }: { route: Route }) {
           body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error(String(res.status));
-        const saved = (await res.json()) as { schedule: Schedule };
+        return (await res.json()) as { schedule: Schedule };
+      };
+      const turn = saving.current.then(send, send);
+      saving.current = turn.catch(() => undefined);
+      try {
+        const saved = await turn;
+        // A later save may already be showing its own change; the last one to finish has them all.
         setLocal({ schedule: saved.schedule, at: Date.now() });
       } catch {
         setLocal(null);
@@ -173,14 +186,35 @@ export default function Tracker({ route }: { route: Route }) {
     if (step.committed.length > 0) setLocalProgress(step.progress);
   }, [plan, data, localProgress]);
 
+  // The walk to Gammage, timed from where the phone is. Only read when a ride home is the next
+  // thing, or when Gammage is the stop being watched by hand.
+  const campusStop = useMemo(() => route.stops.find((s) => s.id === CAMPUS) ?? null, [route]);
+  const rideHomeNext = Boolean(
+    plan && data && plan.legs.some((leg) => leg.id.startsWith('back') && leg.kind === 'bus' && !leg.committed && (leg.freeAt ?? Infinity) <= data.now + 5 * MIN),
+  );
+  const here = useHere(campusStop, schedule?.paceMPerMin ?? 80, rideHomeNext || prefs.stopId === CAMPUS);
+  const lastSent = useRef<{ walkMin: number; at: number } | null>(null);
+  const canSave = Boolean(data?.private);
+  useEffect(() => {
+    const reading = here.reading;
+    // Off campus the reading says nothing about the walk to the stop, so it isn't sent at all.
+    if (!reading || !canSave || reading.walkMin > HERE_MAX_WALK_MIN) return;
+    const last = lastSent.current;
+    if (last && last.walkMin === reading.walkMin && reading.at - last.at < HERE_RESEND_MS) return;
+    lastSent.current = reading;
+    changeToday({ here: reading });
+  }, [here.reading, canSave, changeToday]);
+
   const eta = data?.etas.find((e) => e.stopId === prefs.stopId) ?? null;
   const answer = useMemo(() => {
     if (!data) return null;
     const planned = plan && planAnswer(plan, route, data.now);
     if (planned) return planned;
+    const today = schedule?.override?.date === tempeDayKey(data.now) ? schedule.override : null;
     return answerFor({
       route,
-      prefs,
+      // SoL is the walk from the apartment; Gammage is from wherever you are on campus.
+      prefs: { ...prefs, walkMinutes: stopWalkMinutes(prefs, prefs.stopId, today, data.now) },
       status: data.status,
       eta,
       now: data.now,
@@ -188,7 +222,7 @@ export default function Tracker({ route }: { route: Route }) {
       parkedSince: data.parkedSince,
       onRoute: data.located !== null,
     });
-  }, [data, eta, plan, prefs, route]);
+  }, [data, eta, plan, prefs, route, schedule]);
 
   const upcoming = useMemo(() => [...(data?.etas ?? [])].sort((a, b) => a.seconds - b.seconds), [data]);
   const parkedSince = data?.parkedSince ?? null;
@@ -211,14 +245,14 @@ export default function Tracker({ route }: { route: Route }) {
       <header className="top">
         {route.stops.length > 0 && settings.view ? (
           <label className="stop-picker">
-            <span className="visually-hidden">Your stop</span>
+            <span className="visually-hidden">Where you catch the bus</span>
             <select value={prefs.stopId ?? ''} onChange={(e) => settings.update({ prefs: { stopId: e.target.value } })}>
               <option value="" disabled>
-                Choose your stop
+                Where you catch the bus
               </option>
               {route.stops.map((stop) => (
                 <option key={stop.id} value={stop.id}>
-                  {stop.name}
+                  From {stop.name}
                 </option>
               ))}
             </select>
@@ -260,7 +294,7 @@ export default function Tracker({ route }: { route: Route }) {
         </section>
       )}
 
-      {plan && schedule && data && <Timeline plan={plan} schedule={schedule} route={route} now={data.now} onChange={changeToday} />}
+      {plan && schedule && data && <Timeline plan={plan} schedule={schedule} route={route} now={data.now} here={here} onChange={changeToday} />}
       {planError && (
         <p className="error inset" role="alert">
           {planError}

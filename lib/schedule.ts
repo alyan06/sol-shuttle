@@ -1,4 +1,4 @@
-import type { Place, Route, Schedule } from './types.ts';
+import type { DayOverride, Place, Prefs, Route, Schedule } from './types.ts';
 
 /** Fixed places. Home and campus are the two bus stops; the gym is Sun Devil Fitness Complex. */
 export const HOME = 'sol';
@@ -45,8 +45,38 @@ export function walkMinutes(schedule: Schedule, places: Place[], fromId: string,
   const from = places.find((p) => p.id === fromId);
   const to = places.find((p) => p.id === toId);
   if (!from || !to) return 0;
+  return estimateWalk(from, to, schedule.paceMPerMin);
+}
+
+type Point = { lat: number; lng: number };
+
+/** The same estimate between any two points, such as the phone's position and a stop. */
+export function estimateWalk(from: Point, to: Point, paceMPerMin: number): number {
   const northSouth = Math.abs(from.lat - to.lat) * 111_320;
   const eastWest = Math.abs(from.lng - to.lng) * 111_320 * Math.cos((from.lat * Math.PI) / 180);
   const metres = Math.min(northSouth + eastWest, Math.hypot(northSouth, eastWest) * 1.25);
-  return Math.max(1, Math.ceil(metres / schedule.paceMPerMin));
+  return Math.max(1, Math.ceil(metres / paceMPerMin));
+}
+
+/** A walk from the phone's position is trusted for this long. */
+export const HERE_FRESH_MS = 10 * 60_000;
+/** Further than this from the campus stop and you aren't on campus, so the reading says nothing about the walk to it. */
+export const HERE_MAX_WALK_MIN = 30;
+/** Walk to the campus stop when nothing better is known. */
+const CAMPUS_WALK_DEFAULT_MIN = 10;
+
+/** The location-based walk to the campus stop, if there's a recent, believable one. */
+export function freshHere(override: DayOverride | null | undefined, now: number): { walkMin: number; at: number } | null {
+  const here = override?.here;
+  if (!here || now - here.at > HERE_FRESH_MS || now < here.at - 60_000 || here.walkMin > HERE_MAX_WALK_MIN) return null;
+  return here;
+}
+
+/**
+ * Minutes on foot to whichever stop the bus is being caught at. SoL is always the walk from the
+ * apartment; Gammage is from wherever you are on campus, when the phone has said.
+ */
+export function stopWalkMinutes(prefs: Pick<Prefs, 'walkMinutes'>, stopId: string | null, override: DayOverride | null | undefined, now: number): number {
+  if (stopId !== CAMPUS) return prefs.walkMinutes;
+  return freshHere(override, now)?.walkMin ?? CAMPUS_WALK_DEFAULT_MIN;
 }

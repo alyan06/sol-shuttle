@@ -7,7 +7,8 @@ import type { AlertPrefs, DailyWatch } from '@/lib/types.ts';
 import type { Settings } from './useSettings';
 
 const ALERTS: { key: keyof AlertPrefs; label: string; hint: string; planHint?: string }[] = [
-  { key: 'leave', label: 'Time to leave', hint: 'While watching', planHint: 'For each planned bus, and while watching' },
+  { key: 'leave', label: 'Time to leave', hint: 'While watching', planHint: 'A heads-up, then the moment to go, for each planned bus' },
+  { key: 'afterClass', label: 'Bus home after each class', hint: 'Needs your classes', planHint: 'Only when one can be caught soon' },
   { key: 'atStop', label: 'Bus at my stop', hint: 'While watching', planHint: 'For each planned bus, and while watching' },
   { key: 'notRunning', label: 'Not running', hint: 'Always' },
   { key: 'firstLast', label: 'First and last bus', hint: 'Always' },
@@ -149,7 +150,7 @@ export default function AlertsPanel({ settings, hasStops, planning }: Props) {
       </div>
 
       <fieldset className="group">
-        <legend>Your walk to the stop</legend>
+        <legend>Walk from your apartment to the SoL stop</legend>
         <div className="stepper">
           <button
             className="button"
@@ -169,6 +170,7 @@ export default function AlertsPanel({ settings, hasStops, planning }: Props) {
             +
           </button>
         </div>
+        <p className="note">Catching the bus at Gammage, the walk is timed from your class building, or from where you are once you allow location.</p>
       </fieldset>
 
       <fieldset className="group">
@@ -182,7 +184,7 @@ export default function AlertsPanel({ settings, hasStops, planning }: Props) {
             <input
               type="checkbox"
               role="switch"
-              checked={prefs.alerts[key]}
+              checked={prefs.alerts[key] ?? true}
               onChange={(e) => update({ prefs: { alerts: { ...prefs.alerts, [key]: e.target.checked } } })}
             />
           </label>

@@ -16,7 +16,7 @@ export const defaultPrefs: Prefs = {
   stopId: null,
   walkMinutes: 5,
   bufferMinutes: 2,
-  alerts: { leave: true, atStop: true, notRunning: true, firstLast: true },
+  alerts: { leave: true, afterClass: true, atStop: true, notRunning: true, firstLast: true },
   dailyWatch: null,
 };
 

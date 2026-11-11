@@ -1,4 +1,4 @@
-import { CAMPUS, GYM, HOME, allPlaces, walkMinutes } from './schedule.ts';
+import { CAMPUS, GYM, HOME, allPlaces, freshHere, walkMinutes } from './schedule.ts';
 import { formatClock, tempeDayKey, tempeMidnight, tempeWeekday } from './time.ts';
 import type {
   AfterClass,
@@ -21,6 +21,10 @@ const LEAVE_GRACE_MS = 75_000;
 /** Each loop further ahead adds this much doubt to a time worked out from the loop length. */
 const DRIFT_PER_LOOP_S = 180;
 const SERVICE_SLACK_MS = 5 * MIN;
+/** After a class, a bus home is worth a nudge if you'd set off within this long. Later than that, it "just left". */
+const SOON_AFTER_CLASS_MS = 15 * MIN;
+/** A class counts as "just over" for this long. */
+const JUST_OVER_MS = 2 * MIN;
 /** Still worth heading to a class that started this recently. */
 const LATE_START_MS = 10 * MIN;
 /** A leg still waiting on a bus time this long after it could have begun is over. */
@@ -64,6 +68,11 @@ export type Leg = {
   /** The moment to leave has passed, so this bus is taken as the one being caught. */
   committed?: boolean;
   lastBus?: boolean;
+  /** Class legs: the first bus home you could catch if you left after this class. */
+  after?: { leaveBy: number; at: number; home: number; walkMin: number; here: boolean; source: BusTime['source'] };
+  /** Homeward legs: when you're free to set off, and whether the walk was timed from the phone's position. */
+  freeAt?: number;
+  fromHere?: boolean;
   note?: string;
   warn?: string;
   walkInstead?: { minutes: number; leaveBy: number | null; to: string };
@@ -106,6 +115,8 @@ type Ctx = PlanInput & {
   lastMs: number | null;
   walk: (from: string, to: string) => number;
   name: (placeId: string) => string;
+  /** Walk to the campus stop from where the phone is, when that's known and recent. */
+  here: { walkMin: number; at: number } | null;
 };
 
 function forward(a: number, b: number, length: number): number {
@@ -223,13 +234,26 @@ function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number |
 }
 
 /** Campus to home: the first bus that can be reached from where you are, or the walk if there's none. */
+/** Buses home that can still be reached after a given walk to the campus stop, soonest first. */
+function homeBuses(ctx: Ctx, readyAt: number, walkToStop: number) {
+  const ride = rideSeconds(ctx.route, ctx.campus, ctx.home) * 1000;
+  const earliest = Math.max(readyAt, ctx.now);
+  const lastHome = ctx.lastMs === null ? Infinity : ctx.lastMs + SERVICE_SLACK_MS;
+  return busTimes(ctx, CAMPUS)
+    .filter((bus) => bus.at + ride <= lastHome)
+    .map((bus) => ({ bus, leaveAt: beThereBy(bus, ctx.campus) - walkToStop * MIN, arrive: bus.at + ride }))
+    .filter((x) => x.leaveAt >= earliest - LEAVE_GRACE_MS);
+}
+
 function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number }): Trip {
   const { now, route, home, campus } = ctx;
   const ride = rideSeconds(route, campus, home) * 1000;
-  const walkToStop = ctx.walk(o.from, CAMPUS);
+  // Once you're free to go, the walk is from wherever the phone says you are, not the last classroom.
+  const fromHere = ctx.here !== null && o.readyAt <= now && !ctx.boarded[o.id];
+  const walkToStop = fromHere ? ctx.here!.walkMin : ctx.walk(o.from, CAMPUS);
   const walkHome = ctx.prefs.walkMinutes;
   const walkAll = ctx.walk(o.from, HOME);
-  const base = { id: o.id, kind: 'bus' as const, title: 'Bus home', walkMin: walkToStop, goal: 'Home' };
+  const base = { id: o.id, kind: 'bus' as const, title: 'Bus home', walkMin: walkToStop, goal: 'Home', freeAt: o.readyAt, ...(fromHere ? { fromHere: true } : {}) };
 
   const done = ctx.boarded[o.id];
   if (done) {
@@ -240,10 +264,7 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number }): T
 
   const earliest = Math.max(o.readyAt, now);
   const lastHome = ctx.lastMs === null ? Infinity : ctx.lastMs + SERVICE_SLACK_MS;
-  const options = busTimes(ctx, CAMPUS)
-    .filter((bus) => bus.at + ride <= lastHome)
-    .map((bus) => ({ bus, leaveAt: beThereBy(bus, campus) - walkToStop * MIN, arrive: bus.at + ride }))
-    .filter((x) => x.leaveAt >= earliest - LEAVE_GRACE_MS);
+  const options = homeBuses(ctx, o.readyAt, walkToStop);
   const pick = options[0];
 
   if (!pick) {
@@ -332,6 +353,12 @@ export function planDay(input: PlanInput): DayPlan {
     lastMs: timetable?.lastSec == null ? null : midnight + timetable.lastSec * 1000,
     walk: (from, to) => walkMinutes(schedule, places, from, to),
     name: (id) => places.find((p) => p.id === id)?.name ?? 'class',
+    here: freshHere(ov, now),
+  };
+  // A class that let out early ends when it actually ended.
+  const endOf = (c: ClassBlock) => {
+    const out = ov?.outEarly?.[c.id];
+    return out !== undefined && out >= at(c.startMin) && out < at(c.endMin) ? out : at(c.endMin);
   };
   if (input.progress?.date === date) {
     for (const [id, entry] of Object.entries(input.progress.boarded)) {
@@ -347,12 +374,17 @@ export function planDay(input: PlanInput): DayPlan {
 
   // Getting to the first class that can still be made.
   const target = taken.find((c) => at(c.startMin) > now - LATE_START_MS);
-  if (!leftEarly && target && (ctx.boarded.out || target === taken[0] || at(taken[0].endMin) < now)) {
+  if (!leftEarly && target && (ctx.boarded.out || target === taken[0] || endOf(taken[0]) < now)) {
     const inRoomBy = at(target.startMin) - schedule.arriveEarlyMin * MIN;
     const toRoom = ctx.walk(CAMPUS, target.placeId);
     const trip = outbound(ctx, { id: 'out', readyAt: 0, deadline: inRoomBy - toRoom * MIN, goal: target.course, walkTo: target.placeId, walkBy: inRoomBy, startsAt: at(target.startMin) });
     legs.push(...trip.legs);
-    if (trip.arrive !== null) legs.push(walkLeg('walk-in', `Walk to ${ctx.name(target.placeId)}`, trip.arrive, toRoom));
+    if (trip.arrive !== null) {
+      const early = Math.round((at(target.startMin) - trip.arrive) / MIN) - toRoom;
+      const walkIn = walkLeg('walk-in', `Walk to ${ctx.name(target.placeId)}`, trip.arrive, toRoom);
+      if (early > 0) walkIn.note = `In the room about ${early} min before ${target.course}.`;
+      legs.push(walkIn);
+    }
   }
 
   let previous: ClassBlock | null = null;
@@ -362,7 +394,7 @@ export function planDay(input: PlanInput): DayPlan {
       kind: 'class',
       title: c.course,
       start: at(c.startMin),
-      end: at(c.endMin),
+      end: endOf(c),
       classId: c.id,
       place: ctx.name(c.placeId),
       ...(c.room ? { room: c.room } : {}),
@@ -373,6 +405,14 @@ export function planDay(input: PlanInput): DayPlan {
       const between = ctx.walk(previous.placeId, c.placeId);
       if (between > gap) leg.warn = `${between} min walk from ${ctx.name(previous.placeId)}, ${gap} min gap.`;
       else leg.note = `${between} min walk from ${ctx.name(previous.placeId)}.`;
+    }
+    // The ride home if you left after this class, while there's a bus time to go on.
+    if (!leg.skipped && leg.end! > now - JUST_OVER_MS) {
+      const toStop = ctx.walk(c.placeId, CAMPUS);
+      const first = homeBuses(ctx, leg.end!, toStop)[0];
+      if (first) {
+        leg.after = { leaveBy: first.leaveAt, at: first.bus.at, home: first.arrive + ctx.prefs.walkMinutes * MIN, walkMin: toStop, here: first.bus.here, source: first.bus.source };
+      }
     }
     if (!leg.skipped) previous = c;
     legs.push(leg);
@@ -404,7 +444,7 @@ export function planDay(input: PlanInput): DayPlan {
 
   if (onCampus) {
     const last = taken.at(-1);
-    let cursor = leftEarly ? { placeId: ov!.leftPlaceId!, at: ov!.leftAt! } : { placeId: last!.placeId, at: at(last!.endMin) };
+    let cursor = leftEarly ? { placeId: ov!.leftPlaceId!, at: ov!.leftAt! } : { placeId: last!.placeId, at: endOf(last!) };
     if (afterClass === 'gym') {
       const toGym = ctx.walk(cursor.placeId, GYM);
       const gym = gymLeg(cursor.at + toGym * MIN, schedule, ov?.gymDoneAt);
@@ -473,6 +513,48 @@ export function walkAlerts(plan: DayPlan, now: number, fired: string[]): PlanAle
     }));
 }
 
+/**
+ * The nudge when a class lets out: the bus home, if setting off soon would catch one. Nothing when
+ * the bus has just gone or is a long wait away. Once per class.
+ */
+export function afterClassAlerts(plan: DayPlan, now: number, fired: string[]): PlanAlert[] {
+  return plan.legs
+    .filter((leg) => leg.kind === 'class' && !leg.skipped && leg.after && leg.end! <= now && now < leg.end! + JUST_OVER_MS)
+    .filter((leg) => leg.after!.leaveBy <= leg.end! + SOON_AFTER_CLASS_MS)
+    .filter((leg) => !fired.includes(`${plan.date}:after:${leg.classId}`))
+    .map((leg) => {
+      const a = leg.after!;
+      const go = a.leaveBy - now <= MIN ? 'Leave now' : `Leave by ${formatClock(a.leaveBy)}`;
+      const bus = a.here ? 'is at Gammage now' : `reaches Gammage ${a.source === 'live' ? 'around' : 'roughly'} ${formatClock(a.at)}`;
+      return {
+        id: `after:${leg.classId}`,
+        title: `${leg.title} is over. Bus home ${a.here ? 'now' : formatClock(a.at)}`,
+        body: `${go} to catch it: ${a.walkMin} min walk. The bus ${bus}, home about ${formatClock(a.home)}.`,
+      };
+    });
+}
+
+/** True when the after-class nudge already told you to head for this bus, so the leave alert would repeat it. */
+export function saidAfterClass(plan: DayPlan, leg: Leg, fired: string[]): boolean {
+  if (!leg.bus || leg.bus.stopId !== CAMPUS || leg.start === null) return false;
+  return plan.legs.some(
+    (c) => c.kind === 'class' && c.after && Math.abs(c.after.at - leg.bus!.at) < 4 * MIN && leg.start! - c.end! <= 5 * MIN && fired.includes(`${plan.date}:after:${c.classId}`),
+  );
+}
+
+/** A heads-up some minutes before it's time to leave home, so the leave alert isn't the first you hear of it. */
+export function headsUpAlerts(plan: DayPlan, route: Route, now: number, fired: string[]): PlanAlert[] {
+  return plan.legs
+    .filter((leg) => leg.kind === 'bus' && leg.bus && leg.bus.stopId === HOME && !leg.committed && leg.start !== null)
+    .filter((leg) => leg.start! - now > 8 * MIN && leg.start! - now <= 25 * MIN)
+    .filter((leg) => !fired.includes(`${plan.date}:soon:${leg.id}`))
+    .map((leg) => ({
+      id: `soon:${leg.id}`,
+      title: `Leave at ${formatClock(leg.start!)} for ${leg.goal}`,
+      body: `${busLine(leg, route)}${leg.warn ? ` ${leg.warn}` : ''}`,
+    }));
+}
+
 export type PlanAnswer = { tone: 'calm' | 'go' | 'here' | 'unknown'; lead: string; headline: string; detail: string };
 
 function inMinutes(ms: number): string {
@@ -514,7 +596,8 @@ export function planAnswer(plan: DayPlan, route: Route, now: number): PlanAnswer
     if (leg.start! > now) {
       return { tone: 'calm', lead: `${leg.title} at`, headline: formatClock(leg.start!), detail: [leg.place, leg.room].filter(Boolean).join(', ') + '.' };
     }
-    return { tone: 'calm', lead: `In ${leg.title} until`, headline: formatClock(leg.end!), detail: then.trim() };
+    const home = leg.after ? ` To go home after this: leave by ${formatClock(leg.after.leaveBy)} for the ${formatClock(leg.after.at)} bus.` : '';
+    return { tone: 'calm', lead: `In ${leg.title} until`, headline: formatClock(leg.end!), detail: `${then}${home}`.trim() };
   }
 
   if (leg.kind === 'gym') {

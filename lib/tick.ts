@@ -1,11 +1,11 @@
 import { evaluate, isWatching } from './alerts.ts';
 import { liveBus, timetableToday } from './day.ts';
 import { appendDay, recordObservation } from './history.ts';
-import { advanceProgress, leaveAlert, planDay, walkAlerts } from './plan.ts';
+import { advanceProgress, afterClassAlerts, headsUpAlerts, leaveAlert, planDay, saidAfterClass, walkAlerts } from './plan.ts';
 import { pushConfigured, sendPush } from './push.ts';
 import routeData from './route.json';
 import { fetchPings } from './samsara.ts';
-import { CAMPUS, HOME, hasClasses } from './schedule.ts';
+import { CAMPUS, HOME, hasClasses, stopWalkMinutes } from './schedule.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { load, save } from './store.ts';
 import { tempeDayKey } from './time.ts';
@@ -46,12 +46,21 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
     });
     const step = advanceProgress(progress, plan, now);
     progress = step.progress;
-    if (settings.prefs.alerts.leave) {
-      for (const leg of step.committed) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
-      for (const alert of walkAlerts(plan, now, planFired)) {
+    const once = (alerts: { id: string; title: string; body: string }[]) => {
+      for (const alert of alerts) {
         events.push({ kind: 'plan', title: alert.title, body: alert.body });
         planFired.push(`${date}:${alert.id}`);
       }
+    };
+    // A class just let out: the bus home, if one can be caught soon.
+    if (settings.prefs.alerts.afterClass !== false) once(afterClassAlerts(plan, now, planFired));
+    if (settings.prefs.alerts.leave) {
+      for (const leg of step.committed) {
+        // The after-class nudge a moment ago already said to go for this bus.
+        if (!saidAfterClass(plan, leg, planFired)) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
+      }
+      once(headsUpAlerts(plan, route, now, planFired));
+      once(walkAlerts(plan, now, planFired));
     }
     const due = plan.legs.find((leg) => leg.committed && leg.bus && now >= leg.bus.at - FOLLOW_BEFORE_MS && now < leg.bus.at + FOLLOW_AFTER_MS);
     const justNow = step.committed[0];
@@ -61,9 +70,11 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
 
   // Arrival and outage alerts. While a planned bus is due they follow its stop; the plan already
   // sent the moment to leave, so that one is switched off here.
+  const todayChoices = schedule.override?.date === date ? schedule.override : null;
   const prefs: Prefs = followStop
     ? { ...settings.prefs, stopId: followStop, alerts: { ...settings.prefs.alerts, leave: false } }
-    : settings.prefs;
+    : // Watching by hand: the walk depends on which stop. SoL is from the apartment, Gammage from wherever you are.
+      { ...settings.prefs, walkMinutes: stopWalkMinutes(settings.prefs, settings.prefs.stopId, todayChoices, now) };
   const watching = followStop !== null || isWatching(now, settings.watchUntil, settings.prefs.dailyWatch);
   let alertState: AlertState = tracking;
   if (tracking.alertStopId !== prefs.stopId) {
