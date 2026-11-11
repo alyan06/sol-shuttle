@@ -344,6 +344,10 @@ export default function ScheduleEditor({ route }: { route: Route }) {
           <button type="button" className="button" onClick={() => addClass(pattern)}>
             Add a class
           </button>
+          <label className="field">
+            <span>Last day of these classes (optional)</span>
+            <input type="date" value={pattern.until ?? ''} onChange={(e) => editPattern(pattern.id, { until: e.target.value || undefined })} />
+          </label>
         </section>
       ))}
 

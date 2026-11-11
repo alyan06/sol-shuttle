@@ -122,7 +122,14 @@ export type Place = { id: string; name: string; lat: number; lng: number };
 /** A class meeting. Times are minutes after midnight in Tempe. */
 export type ClassBlock = { id: string; course: string; placeId: string; room?: string; startMin: number; endMin: number };
 
-export type Pattern = { id: string; name: string; days: number[]; classes: ClassBlock[] };
+export type Pattern = {
+  id: string;
+  name: string;
+  days: number[];
+  classes: ClassBlock[];
+  /** Last day these classes meet, as YYYY-MM-DD in Tempe. After it the pattern is ignored. */
+  until?: string;
+};
 
 export type AfterClass = 'gym' | 'home';
 export type Evening = 'bus' | 'walk' | 'skip';

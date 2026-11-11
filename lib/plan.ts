@@ -295,7 +295,7 @@ export function planDay(input: PlanInput): DayPlan {
   const campus = route.stops.find((s) => s.id === CAMPUS);
 
   const classes: ClassBlock[] = schedule.patterns
-    .filter((p) => p.days.includes(weekday))
+    .filter((p) => p.days.includes(weekday) && (!p.until || date <= p.until))
     .flatMap((p) => p.classes)
     .sort((a, b) => a.startMin - b.startMin);
   const taken = classes.filter((c) => !skipped.has(c.id));

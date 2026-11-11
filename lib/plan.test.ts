@@ -147,6 +147,16 @@ describe('getting to class', () => {
     assert.equal(out.bus!.source, 'history');
   });
 
+  it('stops planning classes after their last day', () => {
+    const ended = { ...schedule, patterns: schedule.patterns.map((p) => ({ ...p, until: '2026-11-08' })) };
+    const p = planDay({ now: T(8), schedule: ended, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: live(10), timetable: null, progress: null });
+    assert.equal(p.classCount, 0);
+    // Still a gym day, so the evening trip remains.
+    assert.deepEqual(ids(p), ['walk-out', 'gym', 'walk-back']);
+    const lastDay = { ...schedule, patterns: schedule.patterns.map((p) => ({ ...p, until: '2026-11-09' })) };
+    assert.equal(planDay({ now: T(8), schedule: lastDay, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: live(10), timetable: null, progress: null }).classCount, 2);
+  });
+
   it('warns when two classes are further apart than the gap between them', () => {
     const tight = { ...schedule, walkOverrides: { ...schedule.walkOverrides, 'a|b': 20 } };
     const p = planDay({ now: T(8), schedule: tight, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: live(10), timetable: null, progress: null });
