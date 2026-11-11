@@ -1,7 +1,7 @@
 import { evaluate, isWatching } from './alerts.ts';
 import { liveBus, timetableToday } from './day.ts';
 import { appendDay, recordObservation } from './history.ts';
-import { advanceProgress, afterClassAlerts, headsUpAlerts, leaveAlert, planDay, saidAfterClass, walkAlerts } from './plan.ts';
+import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planDay, walkAlerts } from './plan.ts';
 import { pushConfigured, sendPush } from './push.ts';
 import routeData from './route.json';
 import { fetchPings } from './samsara.ts';
@@ -52,29 +52,28 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
         planFired.push(`${date}:${alert.id}`);
       }
     };
-    // A class just let out: the bus home, if one can be caught soon.
-    if (settings.prefs.alerts.afterClass !== false) once(afterClassAlerts(plan, now, planFired));
+    // The ride home, from the class that's ending or just ended, bus by bus until he's on one.
+    if (settings.prefs.alerts.afterClass !== false) once(busHomeAlerts(plan, now, planFired));
     if (settings.prefs.alerts.leave) {
-      for (const leg of step.committed) {
-        // The after-class nudge a moment ago already said to go for this bus.
-        if (!saidAfterClass(plan, leg, planFired)) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
-      }
+      for (const leg of step.committed) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
       once(headsUpAlerts(plan, route, now, planFired));
       once(walkAlerts(plan, now, planFired));
     }
     const due = plan.legs.find((leg) => leg.committed && leg.bus && now >= leg.bus.at - FOLLOW_BEFORE_MS && now < leg.bus.at + FOLLOW_AFTER_MS);
     const justNow = step.committed[0];
     followStop = (justNow ?? due)?.bus?.stopId ?? null;
+    // Close to a bus home he could be walking to: say when it pulls in at Gammage.
+    const home = plan.homeWatch?.next;
+    if (!followStop && home && now >= home.leaveBy - 10 * MIN && now < home.at + FOLLOW_AFTER_MS) followStop = CAMPUS;
     if (followStop !== HOME && followStop !== CAMPUS) followStop = null;
   }
 
   // Arrival and outage alerts. While a planned bus is due they follow its stop; the plan already
   // sent the moment to leave, so that one is switched off here.
-  const todayChoices = schedule.override?.date === date ? schedule.override : null;
   const prefs: Prefs = followStop
     ? { ...settings.prefs, stopId: followStop, alerts: { ...settings.prefs.alerts, leave: false } }
-    : // Watching by hand: the walk depends on which stop. SoL is from the apartment, Gammage from wherever you are.
-      { ...settings.prefs, walkMinutes: stopWalkMinutes(settings.prefs, settings.prefs.stopId, todayChoices, now) };
+    : // Watching by hand: the walk depends on which stop. SoL is from the apartment, Gammage a typical walk across campus.
+      { ...settings.prefs, walkMinutes: stopWalkMinutes(settings.prefs, settings.prefs.stopId) };
   const watching = followStop !== null || isWatching(now, settings.watchUntil, settings.prefs.dailyWatch);
   let alertState: AlertState = tracking;
   if (tracking.alertStopId !== prefs.stopId) {

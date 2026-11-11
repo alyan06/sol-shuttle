@@ -2,10 +2,8 @@
 
 import Link from 'next/link';
 import { busLine, type DayPlan, type Leg } from '@/lib/plan.ts';
-import { HERE_MAX_WALK_MIN } from '@/lib/schedule.ts';
 import { formatClock, inputToMinute, minuteToInput } from '@/lib/time.ts';
 import type { AfterClass, DayOverride, Evening, Route, Schedule } from '@/lib/types.ts';
-import type { Here } from './useHere';
 
 export type OverrideChange = Partial<Omit<DayOverride, 'date'>> | null;
 
@@ -14,7 +12,6 @@ type Props = {
   schedule: Schedule;
   route: Route;
   now: number;
-  here: Here;
   onChange: (change: OverrideChange) => void;
 };
 
@@ -47,7 +44,7 @@ function Choice<T extends string>({ label, options, value, onPick }: { label: st
 function detail(leg: Leg, route: Route): string {
   if (leg.kind === 'bus') {
     const walk = leg.walkInstead ? ` On foot: ${leg.walkInstead.minutes} min${leg.walkInstead.leaveBy ? `, leave by ${formatClock(leg.walkInstead.leaveBy)}` : ''}.` : '';
-    const stop = leg.bus && leg.walkMin ? ` ${leg.walkMin} min walk ${leg.fromHere ? 'from where you are' : 'to the stop'}.` : '';
+    const stop = leg.bus && leg.walkMin ? ` ${leg.walkMin} min walk to the stop.` : '';
     return `${busLine(leg, route)}${stop}${leg.lastBus ? ' Last bus today.' : ''}${walk}`;
   }
   if (leg.kind === 'walk') return `${leg.walkMin} min, there by ${formatClock(leg.end!)}.`;
@@ -69,22 +66,21 @@ function stateOf(leg: Leg, now: number): 'past' | 'now' | 'later' {
   return 'later';
 }
 
-export default function Timeline({ plan, schedule, route, now, here, onChange }: Props) {
+export default function Timeline({ plan, schedule, route, now, onChange }: Props) {
   const override = schedule.override?.date === plan.date ? schedule.override : null;
   const skipped = override?.skipped ?? [];
   const classes = plan.legs.filter((leg) => leg.kind === 'class');
   const taken = classes.filter((leg) => !leg.skipped);
-  const leftEarly = override?.leftAt !== undefined;
+  // Left campus by hand, on the bus, or home: either way the class-time controls no longer apply.
+  const leftEarly = override?.leftAt !== undefined || override?.onBusAt !== undefined || override?.homeAt !== undefined;
   const inClass = leftEarly ? undefined : taken.find((leg) => leg.start! <= now && now < leg.end!);
   const laterClasses = inClass ? taken.filter((leg) => leg.start! >= inClass.end!) : [];
   const onCampusNow = !leftEarly && taken.length > 0 && now >= taken[0].start! - 20 * MIN && now < taken.at(-1)!.end!;
   const committed = plan.legs.some((leg) => leg.committed);
   // Going home after the class you're in only needs saying when something else was planned after it.
   const canHeadHome = inClass && (laterClasses.length > 0 || plan.afterClass === 'gym');
-  // The walk from the phone's position is not a choice, so it doesn't count as something to reset.
-  const { here: _here, ...choices } = override ?? {};
-  const hasChoices = override !== null && (skipped.length > 0 || Object.keys(choices).some((key) => key !== 'date' && key !== 'skipped'));
-  const hereMinutes = here.reading && here.reading.walkMin <= HERE_MAX_WALK_MIN ? here.reading.walkMin : null;
+  const hasChoices = override !== null && (skipped.length > 0 || Object.keys(override).some((key) => key !== 'date' && key !== 'skipped'));
+  const watch = plan.homeWatch;
 
   function toggleSkip(classId: string) {
     onChange({ skipped: skipped.includes(classId) ? skipped.filter((id) => id !== classId) : [...skipped, classId] });
@@ -172,6 +168,30 @@ export default function Timeline({ plan, schedule, route, now, here, onChange }:
         <p className="note">Nothing planned for the rest of today.</p>
       )}
 
+      {watch && (
+        <div className="watching">
+          <div>
+            <h3>{watch.next ? `Bus home ${watch.next.here ? 'is at Gammage now' : formatClock(watch.next.at)}` : 'Watching for a bus home'}</h3>
+            <p className="note">
+              {watch.next
+                ? `Leave ${watch.place} by ${formatClock(watch.next.leaveBy)}, ${watch.walkMin} min walk. Home about ${formatClock(watch.next.home)}.`
+                : watch.until
+                  ? `Nothing you could leave ${watch.place} for before your next class.`
+                  : `No bus time right now. You'll hear about each one, timed from ${watch.place}.`}
+              {watch.until === null && ' Alerts for every bus keep coming until you tap one of these.'}
+            </p>
+          </div>
+          <div className="button-row">
+            <button className="button" onClick={() => onChange({ onBusAt: now })}>
+              I'm on the bus
+            </button>
+            <button className="button" onClick={() => onChange({ homeAt: now })}>
+              I'm home
+            </button>
+          </div>
+        </div>
+      )}
+
       {(canHeadHome || onCampusNow || committed || hasChoices) && (
         <div className="button-row wrap">
           {canHeadHome && (
@@ -197,18 +217,6 @@ export default function Timeline({ plan, schedule, route, now, here, onChange }:
         </div>
       )}
 
-      {plan.onCampus && here.status === 'off' && (
-        <div className="setup">
-          <p className="note">Time the walk to Gammage from where you are, not from the classroom. Only the minutes are saved, never your location.</p>
-          <button className="button" onClick={here.enable}>
-            Use my location
-          </button>
-        </div>
-      )}
-      {plan.onCampus && here.status === 'on' && hereMinutes !== null && <p className="note">From where you are, Gammage is about {hereMinutes} min on foot.</p>}
-      {plan.onCampus && here.status === 'denied' && (
-        <p className="note">Location is blocked for this app, so walks to Gammage are timed from your classroom. You can allow it in Settings, under Safari or Shuttle, then Location.</p>
-      )}
       {plan.service && <p className="note">{plan.service}</p>}
     </section>
   );

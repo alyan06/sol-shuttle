@@ -878,3 +878,15 @@ input::-webkit-date-and-time-value {
     min-height: 44px;
   }
 }
+
+.watching {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.watching .button {
+  flex: 1;
+}

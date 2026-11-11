@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { advanceProgress, afterClassAlerts, headsUpAlerts, leaveAlert, planAnswer, planDay, saidAfterClass, walkAlerts, type LiveBus, type PlanInput } from './plan.ts';
+import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planAnswer, planDay, walkAlerts, type LiveBus, type PlanInput } from './plan.ts';
 import { defaultSchedule } from './schedule.ts';
 import { formatClock } from './time.ts';
 import type { DayOverride, Route, Schedule, Timetable } from './types.ts';
@@ -343,64 +343,101 @@ describe('planAnswer', () => {
   });
 });
 
-describe('the bus home after each class', () => {
+describe('the ride home, class by class', () => {
   // live(n): the bus reaches SoL in n minutes and Gammage 20 minutes after that, on a 35 minute loop.
-  it('works out the first bus home you could catch after every class, not just the last', () => {
-    // 10:00. Bus reaches Gammage 10:30. CSE 205 ends 10:15, 8 min walk, 2 spare: leave by 10:20.
+  const keys = (p: ReturnType<typeof planDay>, alerts: { id: string }[]) => alerts.map((a) => `${p.date}:${a.id}`);
+
+  it('shows the first bus home after every class on its row', () => {
     const p = plan(T(10), live(10));
     const after = leg(p, 'class:c1').after!;
     assert.deepEqual([clock(after.leaveBy), clock(after.at), clock(after.home), after.walkMin], ['10:20 AM', '10:30 AM', '10:50 AM', 8]);
-    // MAT 267 ends 11:45, 7 min walk: the 11:40 bus is too early, so it's the one after.
-    assert.equal(clock(leg(p, 'class:c2').after!.at), '12:15 PM');
   });
 
-  it('nudges when a class lets out and a bus can be caught soon', () => {
-    const now = T(10, 15) + 30_000;
-    const p = plan(now, live(29.5));
-    const [alert] = afterClassAlerts(p, now, []);
-    assert.equal(alert.title, 'CSE 205 is over. Bus home 10:30 AM');
-    assert.equal(alert.body, 'Leave by 10:20 AM to catch it: 8 min walk. The bus reaches Gammage around 10:30 AM, home about 10:50 AM.');
-    assert.equal(afterClassAlerts(p, now, [`${p.date}:after:c1`]).length, 0);
+  it('starts from the first class 15 minutes before it ends, measured from its building', () => {
+    assert.equal(plan(T(9, 59), live(11)).homeWatch, null);
+    const p = plan(T(10), live(10));
+    const watch = p.homeWatch!;
+    assert.deepEqual([watch.course, watch.place, watch.walkMin, clock(watch.until)], ['CSE 205', 'Brickyard', 8, '10:30 AM']);
+    const [alert] = busHomeAlerts(p, T(10), []);
+    assert.equal(alert.title, 'After CSE 205: bus home 10:30 AM');
+    assert.equal(alert.body, 'Leave Brickyard by 10:20 AM, 8 min walk. It reaches Gammage around 10:30 AM, home about 10:50 AM.');
+    assert.deepEqual(busHomeAlerts(p, T(10), keys(p, [alert])), []);
   });
 
-  it('stays quiet when the bus has just gone or is a long wait away', () => {
-    // Bus reaches Gammage 10:49: you would not set off for another 24 minutes.
-    const now = T(10, 15) + 30_000;
-    assert.deepEqual(afterClassAlerts(plan(now, live(14)), now, []), []);
-    assert.deepEqual(afterClassAlerts(plan(now, null), now, []), []);
+  it('says nothing for a bus you could not leave for before the next class', () => {
+    // Bus reaches Gammage 10:49: leaving at 10:39 is after MAT 267 starts.
+    const p = plan(T(10, 16), live(13));
+    assert.equal(p.homeWatch!.next, null);
+    assert.deepEqual(busHomeAlerts(p, T(10, 16), []), []);
   });
 
-  it('says nothing before the class ends or long after', () => {
-    assert.deepEqual(afterClassAlerts(plan(T(10, 10), live(0)), T(10, 10), []), []);
-    assert.deepEqual(afterClassAlerts(plan(T(10, 20), live(25)), T(10, 20), []), []);
+  it('goes quiet once the next class starts, then moves to that class and its building', () => {
+    assert.equal(plan(T(10, 31), live(5)).homeWatch, null);
+    assert.equal(plan(T(11, 29), live(5)).homeWatch, null);
+    const watch = plan(T(11, 30), live(15)).homeWatch!;
+    assert.deepEqual([watch.course, watch.place, watch.walkMin, watch.until], ['MAT 267', 'Coor Hall', 7, null]);
   });
 
-  it('skips a class marked skipped', () => {
-    const now = T(10, 15) + 30_000;
-    assert.deepEqual(afterClassAlerts(plan(now, live(29.5), { ov: { skipped: ['c1'] } }), now, []), []);
+  it('after the last class announces every bus until told otherwise, without assuming the gym', () => {
+    // Gym is the plan after class, but nobody has said they went. Buses reach Gammage 11:55, 12:30, 1:05.
+    const first = plan(T(11, 31), live(4));
+    const a = busHomeAlerts(first, T(11, 31), []);
+    assert.equal(a[0].title, 'After MAT 267: bus home 11:55 AM');
+    let fired = keys(first, a);
+
+    // 11:50: that bus can no longer be reached, and the 12:30 isn't close yet.
+    const waiting = plan(T(11, 50), live(20));
+    assert.equal(clock(waiting.homeWatch!.next!.at), '12:30 PM');
+    assert.deepEqual(busHomeAlerts(waiting, T(11, 50), fired), []);
+
+    // 12:12: ten minutes before the moment to leave for the 12:30.
+    const second = plan(T(12, 12), live(33));
+    const b = busHomeAlerts(second, T(12, 12), fired);
+    assert.equal(b[0].title, 'After MAT 267: bus home 12:30 PM');
+    fired = [...fired, ...keys(second, b)];
+    assert.deepEqual(busHomeAlerts(plan(T(12, 14), live(31)), T(12, 14), fired), []);
+
+    // And the one after that, still measured from Coor Hall.
+    const third = plan(T(12, 47), live(33));
+    assert.equal(busHomeAlerts(third, T(12, 47), fired)[0].title, 'After MAT 267: bus home 1:05 PM');
+    assert.equal(third.homeWatch!.walkMin, 7);
   });
 
-  it('does not repeat itself as a leave alert a minute later', () => {
-    // MAT 267 ends 11:45. Bus reaches Gammage 11:55, so the moment to leave is 11:46.
-    const now = T(11, 45) + 30_000;
-    const p = plan(now, live(24.5), { ov: { afterClass: 'home' } });
-    const fired = afterClassAlerts(p, now, []).map((a) => `${p.date}:${a.id}`);
-    assert.deepEqual(fired, [`${p.date}:after:c2`]);
-    assert.equal(saidAfterClass(p, leg(p, 'back'), fired), true);
-    assert.equal(saidAfterClass(p, leg(p, 'back'), []), false);
+  it('never takes the ride home as caught on its own', () => {
+    const p = plan(T(11, 47), live(23), { ov: { afterClass: 'home' } });
+    assert.ok(leg(p, 'back').start! <= T(11, 47));
+    assert.deepEqual(advanceProgress(null, p, T(11, 47)).committed, []);
+  });
+
+  it('stops when you say you are on the bus, and plans the evening from getting home', () => {
+    const p = plan(T(12, 0), live(20), { ov: { onBusAt: T(11, 56) } });
+    assert.equal(p.homeWatch, null);
+    assert.ok(!ids(p).includes('back') && !ids(p).includes('walk-gym'));
+    // On the bus 11:56, 15 min ride, 5 min walk: home 12:16. Gym day, so the evening trip remains.
+    assert.deepEqual(ids(p).slice(-3), ['walk-out', 'gym', 'walk-back']);
+    assert.deepEqual(busHomeAlerts(p, T(12, 0), []), []);
+  });
+
+  it('stops when you say you are home', () => {
+    const p = plan(T(12, 30), live(20), { ov: { homeAt: T(12, 30), evening: 'skip' } });
+    assert.equal(p.homeWatch, null);
+    assert.deepEqual(ids(p), ['class:c1', 'class:c2']);
+  });
+
+  it('gives up by itself hours after the last class', () => {
+    assert.ok(plan(T(16, 0), live(20)).homeWatch);
+    assert.equal(plan(T(17, 0), live(20)).homeWatch, null);
   });
 });
 
 describe('getting out early and heading home', () => {
-  it('ends a class when it actually let out', () => {
+  it('ends a class when it actually let out, and watches the ride home from then', () => {
     // MAT 267 lets out at 11:20 instead of 11:45. Bus reaches Gammage 11:35.
     const now = T(11, 21);
-    const p = plan(now, live(29), { ov: { outEarly: { c2: T(11, 20) }, afterClass: 'home' } });
+    const p = plan(now, live(29), { ov: { outEarly: { c2: T(11, 20) } } });
     assert.equal(clock(leg(p, 'class:c2').end), '11:20 AM');
-    assert.equal(leg(p, 'back').freeAt, T(11, 20));
-    assert.equal(clock(leg(p, 'back').bus!.at), '11:35 AM');
-    // And the nudge fires for the early finish.
-    assert.equal(afterClassAlerts(p, now, []).length, 1);
+    assert.equal(p.homeWatch!.freeAt, T(11, 20));
+    assert.equal(busHomeAlerts(p, now, [])[0].title, 'After MAT 267: bus home 11:35 AM');
   });
 
   it('ignores an early finish that is not inside the class', () => {
@@ -409,33 +446,16 @@ describe('getting out early and heading home', () => {
   });
 
   it('goes home after the current class when the later ones are dropped', () => {
-    // In CSE 205, deciding to go home after it: MAT 267 is skipped, the ride home starts from 10:15.
-    const p = plan(T(9, 40), live(30), { ov: { skipped: ['c2'], afterClass: 'home' } });
+    // In CSE 205, deciding to go home after it: MAT 267 is skipped, so CSE 205 is now the last class.
+    const p = plan(T(10, 5), live(5), { ov: { skipped: ['c2'], afterClass: 'home' } });
     assert.equal(leg(p, 'back').freeAt, T(10, 15));
-    // The 9:55 bus is before class ends. The next reaches Gammage about 10:30, a loop ahead, so it
-    // carries more doubt: be there by 10:25, which means leaving Brickyard at 10:17.
-    assert.equal(clock(leg(p, 'back').start), '10:17 AM');
-  });
-});
-
-describe('walk to the bus from where you are', () => {
-  const at1150 = T(11, 50);
-  const home = (here: { walkMin: number; at: number }) => leg(plan(at1150, live(30), { ov: { afterClass: 'home', here } }), 'back');
-
-  it('uses the phone-based walk once class is over', () => {
-    const back = home({ walkMin: 3, at: at1150 - 60_000 });
-    assert.equal(back.walkMin, 3);
-    assert.equal(back.fromHere, true);
-    // Bus reaches Gammage 12:05; 3 min walk and 2 spare: leave at 12:00, not 11:56.
-    assert.equal(clock(back.start), '12:00 PM');
+    assert.deepEqual([p.homeWatch!.course, p.homeWatch!.until], ['CSE 205', null]);
   });
 
-  it('falls back to the classroom walk when the reading is old, far away, or class is still on', () => {
-    assert.equal(home({ walkMin: 3, at: at1150 - 20 * 60_000 }).walkMin, 7);
-    assert.equal(home({ walkMin: 40, at: at1150 - 60_000 }).walkMin, 7);
-    const inClass = leg(plan(T(11, 30), live(30), { ov: { afterClass: 'home', here: { walkMin: 3, at: T(11, 29) } } }), 'back');
-    assert.equal(inClass.walkMin, 7);
-    assert.equal(inClass.fromHere, undefined);
+  it('watches from where you left when leaving campus by hand', () => {
+    const p = plan(T(9, 40), live(14), { ov: { skipped: ['c1', 'c2'], leftAt: T(9, 40), leftPlaceId: 'a', afterClass: 'home' } });
+    assert.deepEqual([p.homeWatch!.course, p.homeWatch!.place, p.homeWatch!.walkMin], [null, 'Brickyard', 8]);
+    assert.match(busHomeAlerts(p, T(9, 55), [])[0].title, /^From campus: bus home 10:14 AM/);
   });
 });
 
@@ -455,7 +475,6 @@ describe('before class', () => {
   });
 
   it('says how early the bus gets you to the room', () => {
-    // Gammage 8:30, 8 min walk: in the room 8:38 for a 9:00 class.
     assert.equal(leg(plan(T(8), live(10)), 'walk-in').note, 'In the room about 22 min before CSE 205.');
   });
 });

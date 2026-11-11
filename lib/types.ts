@@ -161,8 +161,9 @@ export type DayOverride = {
   replanAt?: number;
   /** Classes that let out early today, by class id, and when. */
   outEarly?: Record<string, number>;
-  /** Minutes on foot to the campus stop from where the phone last was. Only the minutes are kept, never the place. */
-  here?: { walkMin: number; at: number };
+  /** "I'm on the bus" and "I'm home": either one ends the bus-home alerts for the day. */
+  onBusAt?: number;
+  homeAt?: number;
 };
 
 export type Schedule = {

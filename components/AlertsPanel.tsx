@@ -8,7 +8,7 @@ import type { Settings } from './useSettings';
 
 const ALERTS: { key: keyof AlertPrefs; label: string; hint: string; planHint?: string }[] = [
   { key: 'leave', label: 'Time to leave', hint: 'While watching', planHint: 'A heads-up, then the moment to go, for each planned bus' },
-  { key: 'afterClass', label: 'Bus home after each class', hint: 'Needs your classes', planHint: 'Only when one can be caught soon' },
+  { key: 'afterClass', label: 'Bus home after class', hint: 'Needs your classes', planHint: 'From 15 min before each class ends, then every bus after your last one' },
   { key: 'atStop', label: 'Bus at my stop', hint: 'While watching', planHint: 'For each planned bus, and while watching' },
   { key: 'notRunning', label: 'Not running', hint: 'Always' },
   { key: 'firstLast', label: 'First and last bus', hint: 'Always' },
@@ -170,7 +170,7 @@ export default function AlertsPanel({ settings, hasStops, planning }: Props) {
             +
           </button>
         </div>
-        <p className="note">Catching the bus at Gammage, the walk is timed from your class building, or from where you are once you allow location.</p>
+        <p className="note">Catching the bus at Gammage, the walk is timed from the class you're in or just left.</p>
       </fieldset>
 
       <fieldset className="group">

@@ -8,12 +8,11 @@ import type { ShuttleResponse } from '@/app/api/shuttle/route';
 import { defaultPrefs, parkedUp } from '@/lib/alerts.ts';
 import { answerFor } from '@/lib/answer.ts';
 import { advanceProgress, planAnswer, planDay } from '@/lib/plan.ts';
-import { CAMPUS, HERE_MAX_WALK_MIN, hasClasses, stopWalkMinutes } from '@/lib/schedule.ts';
+import { hasClasses, stopWalkMinutes } from '@/lib/schedule.ts';
 import { formatClock, formatSince, tempeDayKey } from '@/lib/time.ts';
 import type { Progress, Route, Schedule } from '@/lib/types.ts';
 import AlertsPanel from './AlertsPanel';
 import Timeline, { type OverrideChange } from './Timeline';
-import { useHere } from './useHere';
 import { useSettings } from './useSettings';
 
 const ShuttleMap = dynamic(() => import('./ShuttleMap'), {
@@ -22,9 +21,7 @@ const ShuttleMap = dynamic(() => import('./ShuttleMap'), {
 });
 
 const POLL_MS = 15_000;
-const MIN = 60_000;
-/** A walk reading is sent again this often while it hasn't changed, to keep it fresh for the alerts. */
-const HERE_RESEND_MS = 4 * MIN;
+
 
 type Fetched = { body: ShuttleResponse; requestedAt: number };
 
@@ -186,35 +183,15 @@ export default function Tracker({ route }: { route: Route }) {
     if (step.committed.length > 0) setLocalProgress(step.progress);
   }, [plan, data, localProgress]);
 
-  // The walk to Gammage, timed from where the phone is. Only read when a ride home is the next
-  // thing, or when Gammage is the stop being watched by hand.
-  const campusStop = useMemo(() => route.stops.find((s) => s.id === CAMPUS) ?? null, [route]);
-  const rideHomeNext = Boolean(
-    plan && data && plan.legs.some((leg) => leg.id.startsWith('back') && leg.kind === 'bus' && !leg.committed && (leg.freeAt ?? Infinity) <= data.now + 5 * MIN),
-  );
-  const here = useHere(campusStop, schedule?.paceMPerMin ?? 80, rideHomeNext || prefs.stopId === CAMPUS);
-  const lastSent = useRef<{ walkMin: number; at: number } | null>(null);
-  const canSave = Boolean(data?.private);
-  useEffect(() => {
-    const reading = here.reading;
-    // Off campus the reading says nothing about the walk to the stop, so it isn't sent at all.
-    if (!reading || !canSave || reading.walkMin > HERE_MAX_WALK_MIN) return;
-    const last = lastSent.current;
-    if (last && last.walkMin === reading.walkMin && reading.at - last.at < HERE_RESEND_MS) return;
-    lastSent.current = reading;
-    changeToday({ here: reading });
-  }, [here.reading, canSave, changeToday]);
-
   const eta = data?.etas.find((e) => e.stopId === prefs.stopId) ?? null;
   const answer = useMemo(() => {
     if (!data) return null;
     const planned = plan && planAnswer(plan, route, data.now);
     if (planned) return planned;
-    const today = schedule?.override?.date === tempeDayKey(data.now) ? schedule.override : null;
     return answerFor({
       route,
-      // SoL is the walk from the apartment; Gammage is from wherever you are on campus.
-      prefs: { ...prefs, walkMinutes: stopWalkMinutes(prefs, prefs.stopId, today, data.now) },
+      // SoL is the walk from the apartment; Gammage is a typical walk across campus.
+      prefs: { ...prefs, walkMinutes: stopWalkMinutes(prefs, prefs.stopId) },
       status: data.status,
       eta,
       now: data.now,
@@ -222,7 +199,7 @@ export default function Tracker({ route }: { route: Route }) {
       parkedSince: data.parkedSince,
       onRoute: data.located !== null,
     });
-  }, [data, eta, plan, prefs, route, schedule]);
+  }, [data, eta, plan, prefs, route]);
 
   const upcoming = useMemo(() => [...(data?.etas ?? [])].sort((a, b) => a.seconds - b.seconds), [data]);
   const parkedSince = data?.parkedSince ?? null;
@@ -294,7 +271,7 @@ export default function Tracker({ route }: { route: Route }) {
         </section>
       )}
 
-      {plan && schedule && data && <Timeline plan={plan} schedule={schedule} route={route} now={data.now} here={here} onChange={changeToday} />}
+      {plan && schedule && data && <Timeline plan={plan} schedule={schedule} route={route} now={data.now} onChange={changeToday} />}
       {planError && (
         <p className="error inset" role="alert">
           {planError}
