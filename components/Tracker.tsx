@@ -249,6 +249,16 @@ export default function Tracker({ route }: { route: Route }) {
       </section>
 
       {settings.locked && <PasscodeGate onUnlock={settings.unlock} error={settings.error} />}
+      {settings.failed && (
+        <section className="section">
+          <p className="error" role="alert">
+            Couldn't load your settings. The bus map still works.
+          </p>
+          <button className="button" onClick={settings.retry}>
+            Try again
+          </button>
+        </section>
+      )}
 
       {plan && schedule && data && <Timeline plan={plan} schedule={schedule} route={route} now={data.now} onChange={changeToday} />}
       {planError && (

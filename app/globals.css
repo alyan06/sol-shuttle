@@ -845,3 +845,36 @@ a.button {
     gap: 8px;
   }
 }
+
+/* Safari on iPhone */
+button,
+select,
+input,
+a {
+  /* No double-tap zoom on controls, so a quick second tap on a stepper counts as a tap. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.stop-picker select {
+  -webkit-appearance: none;
+}
+
+/* iOS gives time and date fields their own width and centres the value, which overflows a grid. */
+input[type='time'],
+input[type='date'] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+}
+
+input::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+@media (pointer: coarse) {
+  .segmented button,
+  .button.small {
+    min-height: 44px;
+  }
+}

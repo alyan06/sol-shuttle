@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { SettingsView } from '@/app/api/settings/route';
+import { subscriptionEndpoint } from '@/lib/push-client.ts';
 import type { Prefs } from '@/lib/types.ts';
 
 const PASSCODE_KEY = 'shuttle.passcode';
@@ -35,7 +36,8 @@ export function useSettings() {
   const [error, setError] = useState<string | null>(null);
   /** Null until this device's saved passcode has been read. */
   const [passcode, setPasscodeState] = useState<string | null>(null);
-  const [locked, setLocked] = useState(false);
+  const [status, setStatus] = useState<'loading' | 'locked' | 'ready' | 'failed'>('loading');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => setPasscodeState(storedPasscode()), []);
 
@@ -43,31 +45,39 @@ export function useSettings() {
     if (passcode === null) return;
     let cancelled = false;
     async function load(code: string) {
-      const registration = await navigator.serviceWorker?.getRegistration().catch(() => undefined);
-      const subscription = await registration?.pushManager.getSubscription().catch(() => null);
-      const query = subscription ? `?endpoint=${encodeURIComponent(subscription.endpoint)}` : '';
+      // Never lets a missing push feature (iPhone Safari outside the Home Screen app) block the page.
+      const endpoint = await subscriptionEndpoint(navigator);
+      const query = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : '';
       const res = await fetch(`/api/settings${query}`, { cache: 'no-store', headers: { 'x-passcode': code } });
       if (cancelled) return;
       if (res.status === 401) {
-        setLocked(true);
+        setStatus('locked');
         if (code) setError('That passcode is wrong.');
         return;
       }
       if (!res.ok) throw new Error(String(res.status));
       setView((await res.json()) as SettingsView);
-      setLocked(false);
+      setStatus('ready');
       setError(null);
     }
-    load(passcode).catch(() => !cancelled && setError("Couldn't load your settings."));
+    load(passcode).catch(() => !cancelled && setStatus('failed'));
     return () => {
       cancelled = true;
     };
-  }, [passcode]);
+  }, [passcode, attempt]);
+
+  const retry = useCallback(() => {
+    setStatus('loading');
+    setAttempt((n) => n + 1);
+  }, []);
 
   const unlock = useCallback((value: string) => {
     storePasscode(value);
     setError(null);
+    // The lock screen stays up while the passcode is checked, so a wrong one can be corrected in place.
     setPasscodeState(value);
+    // Counts as a fresh try even when the same passcode is entered again.
+    setAttempt((n) => n + 1);
   }, []);
 
   const update = useCallback(
@@ -89,7 +99,7 @@ export function useSettings() {
     [passcode],
   );
 
-  return { view, error, setError, passcode, locked, unlock, update, setView };
+  return { view, error, setError, passcode, locked: status === 'locked', failed: status === 'failed', retry, unlock, update, setView };
 }
 
 export type Settings = ReturnType<typeof useSettings>;

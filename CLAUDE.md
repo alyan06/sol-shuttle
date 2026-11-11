@@ -60,5 +60,7 @@ npm run tick:local  # runs the alert check every 30s against the dev server (nee
 - MapLibre can't parse `oklch()`, so `cssColor()` in `ShuttleMap.tsx` converts tokens through a canvas.
 - `web-push` and `maplibre-gl` have no default export in these versions.
 - iOS web push only works from the Home Screen app, needs HTTPS, and every push must show a notification.
+- In an iPhone Safari tab (not the Home Screen app) there is no Push API: a service worker registration exists but `registration.pushManager` is undefined, and `PushManager` is not on `window`. Reaching through it once crashed the settings load, so the phone showed only the map with no passcode box. All push lookups go through `lib/push-client.ts`, which answers "no subscription" instead. Test by deleting `pushManager` from `ServiceWorkerRegistration.prototype` in a desktop browser.
+- The map takes two fingers to move on touch screens (`cooperativeGestures`), so one finger scrolls the page past it.
 - Samsara sends no pings while the bus is parked (gaps over 4 min). Pause lengths run to the next moving ping, and `feedStatus` keeps a parked bus live for 6 min. It sends a heartbeat every 5 min while parked, so a bus that's done for the day still reads as `live`; `parkedUp` (20 min, from `lastMovedAt`, which only the tick updates) is what turns that into "Not running".
 - Adding a file to `public/` while `next dev` runs can 404 until the next reload.

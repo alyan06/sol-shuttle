@@ -59,7 +59,9 @@ export default function ShuttleMap({ route, ping, live, selectedStopId }: Props)
       attributionControl: { compact: true },
       dragRotate: false,
       pitchWithRotate: false,
-      cooperativeGestures: false,
+      // On a phone the map is most of a screen tall. One finger has to scroll the page past it,
+      // so moving the map takes two. With a mouse, drag and wheel work as usual.
+      cooperativeGestures: matchMedia('(pointer: coarse)').matches,
     });
     instance.touchZoomRotate.disableRotation();
     instance.on('dragstart', () => {

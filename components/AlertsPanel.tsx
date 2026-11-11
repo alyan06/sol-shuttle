@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { currentSubscription } from '@/lib/push-client.ts';
 import { formatClock, inputToMinute as fromTimeInput, minuteToInput as toTimeInput } from '@/lib/time.ts';
 import type { AlertPrefs, DailyWatch } from '@/lib/types.ts';
 import type { Settings } from './useSettings';
@@ -74,11 +75,10 @@ export default function AlertsPanel({ settings, hasStops, planning }: Props) {
 
   async function disable() {
     setBusy(true);
-    const registration = await navigator.serviceWorker.getRegistration();
-    const subscription = await registration?.pushManager.getSubscription();
+    const subscription = await currentSubscription(navigator);
     if (subscription) {
       await update({ unsubscribe: subscription.endpoint });
-      await subscription.unsubscribe();
+      await subscription.unsubscribe?.();
     }
     setView((prev) => prev && { ...prev, subscribed: false });
     setBusy(false);
