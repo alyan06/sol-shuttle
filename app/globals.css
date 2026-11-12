@@ -13,6 +13,11 @@
   --accent: oklch(0.72 0.15 72);
   --accent-ink: oklch(0.47 0.11 66);
   --error: oklch(0.5 0.17 28);
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --bus-blue: oklch(0.5 0.17 256);
+  --bus-orange: oklch(0.73 0.17 58);
+  --bus-glass: oklch(0.93 0.03 235);
+  --bus-edge: oklch(1 0 0);
   --radius: 14px;
   --gutter: 20px;
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
@@ -31,6 +36,10 @@
     --accent: oklch(0.8 0.14 76);
     --accent-ink: oklch(0.84 0.13 78);
     --error: oklch(0.76 0.13 28);
+    --bus-blue: oklch(0.62 0.16 256);
+    --bus-orange: oklch(0.78 0.16 62);
+    --bus-glass: oklch(0.9 0.04 235);
+    --bus-edge: oklch(0.98 0 0);
   }
 }
 
@@ -48,7 +57,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 400 1rem/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, sans-serif;
+  font: 400 1rem/1.45 var(--font);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -208,35 +217,92 @@ select {
   font-size: 0.875rem;
 }
 
-.bus-marker {
+/* The bus, seen from above. Blue body, orange roof: the two colours it's known by. */
+.bus {
   position: relative;
   z-index: var(--z-marker);
-  width: 22px;
-  height: 22px;
-  border: 3px solid var(--bg);
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+}
+
+.bus svg {
+  position: relative;
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px oklch(0 0 0 / 0.35));
+  transition: filter 400ms var(--ease), opacity 400ms var(--ease);
+}
+
+.bus-body {
+  fill: var(--bus-blue);
+  stroke: var(--bus-edge);
+  stroke-width: 2.5;
+  paint-order: stroke;
+}
+
+.bus-roof {
+  fill: var(--bus-orange);
+}
+
+.bus-vent {
+  fill: var(--bus-blue);
+  opacity: 0.55;
+}
+
+.bus-glass {
+  fill: var(--bus-glass);
+}
+
+/* A soft disc so the bus is easy to find at a glance. It breathes only while the bus is moving. */
+.bus-halo {
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
-  background: var(--primary);
-  box-shadow: 0 1px 6px oklch(0 0 0 / 0.35);
+  background: var(--bus-blue);
+  opacity: 0.16;
 }
 
-.bus-marker[data-live='false'] {
-  background: var(--muted);
+.bus[data-moving='true'] .bus-halo {
+  animation: bus-breathe 2.4s var(--ease) infinite;
 }
 
-.bus-marker-arrow {
-  position: absolute;
-  inset: -13px;
-  transition: transform 300ms var(--ease), opacity 200ms var(--ease);
+@keyframes bus-breathe {
+  from {
+    transform: scale(0.75);
+    opacity: 0.26;
+  }
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
 }
 
-.bus-marker-arrow::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 50%;
-  margin-left: -6px;
-  border-inline: 6px solid transparent;
-  border-bottom: 9px solid var(--primary);
+/* Old news: the last known position of a bus that's gone quiet. */
+.bus[data-live='false'] svg {
+  filter: grayscale(1) drop-shadow(0 2px 3px oklch(0 0 0 / 0.25));
+  opacity: 0.7;
+}
+
+.bus[data-live='false'] .bus-halo {
+  display: none;
+}
+
+.stop-label {
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 4px oklch(0 0 0 / 0.14);
+  color: var(--muted);
+  /* The map sets its own typeface on everything inside it. */
+  font: 600 0.8125rem/1.5 var(--font);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.stop-label[data-focus='true'] {
+  box-shadow: 0 0 0 1.5px var(--bus-orange), 0 1px 4px oklch(0 0 0 / 0.14);
+  color: var(--ink);
 }
 
 .section {
@@ -695,6 +761,7 @@ select {
 }
 
 a.button {
+  color: inherit;
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -889,4 +956,37 @@ input::-webkit-date-and-time-value {
 
 .watching .button {
   flex: 1;
+}
+
+.map-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: var(--z-marker);
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line), 0 2px 8px oklch(0 0 0 / 0.16);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 150ms var(--ease);
+}
+
+.map-toggle:active {
+  transform: scale(0.97);
+}
+
+.map-toggle[aria-pressed='true'] {
+  background: var(--bus-blue);
+  box-shadow: 0 2px 8px oklch(0 0 0 / 0.2);
+  color: oklch(1 0 0);
+}
+
+@media (pointer: coarse) {
+  .map-toggle {
+    min-height: 44px;
+  }
 }

@@ -8,7 +8,7 @@ import type { ShuttleResponse } from '@/app/api/shuttle/route';
 import { defaultPrefs, parkedUp } from '@/lib/alerts.ts';
 import { answerFor } from '@/lib/answer.ts';
 import { advanceProgress, planAnswer, planDay } from '@/lib/plan.ts';
-import { hasClasses, stopWalkMinutes } from '@/lib/schedule.ts';
+import { CAMPUS, hasClasses, stopWalkMinutes } from '@/lib/schedule.ts';
 import { formatClock, formatSince, tempeDayKey } from '@/lib/time.ts';
 import type { Progress, Route, Schedule } from '@/lib/types.ts';
 import AlertsPanel from './AlertsPanel';
@@ -201,6 +201,16 @@ export default function Tracker({ route }: { route: Route }) {
     });
   }, [data, eta, plan, prefs, route]);
 
+  // The stop the next ride is caught at. On a class day that's the plan's call; otherwise the picker's.
+  const focusStopId = useMemo(() => {
+    if (plan && data) {
+      const ride = plan.legs.find((leg) => leg.kind === 'bus' && leg.bus && (leg.end ?? Infinity) > data.now);
+      if (ride?.bus) return ride.bus.stopId;
+      if (plan.homeWatch) return CAMPUS;
+    }
+    return prefs.stopId;
+  }, [plan, data, prefs.stopId]);
+
   const upcoming = useMemo(() => [...(data?.etas ?? [])].sort((a, b) => a.seconds - b.seconds), [data]);
   const parkedSince = data?.parkedSince ?? null;
   const out = parkedUp(parkedSince, data?.now ?? now);
@@ -292,7 +302,14 @@ export default function Tracker({ route }: { route: Route }) {
       )}
 
       <div className="map-wrap">
-        <ShuttleMap route={route} ping={data?.lastSeen ?? null} live={live} selectedStopId={prefs.stopId} />
+        <ShuttleMap
+          route={route}
+          ping={data?.lastSeen ?? null}
+          live={live}
+          s={data?.ping ? (data.located?.s ?? null) : null}
+          ageMs={data?.ping ? data.now - data.ping.time : 0}
+          focusStopId={focusStopId}
+        />
         {data?.lastSeen && <p className="map-caption">{caption}</p>}
       </div>
 

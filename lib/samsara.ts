@@ -1,3 +1,4 @@
+import { replayPings, replaying } from './replay.ts';
 import type { Ping } from './types.ts';
 
 const HOST = 'https://us6-ws.cloud.samsara.com';
@@ -84,6 +85,7 @@ async function load(): Promise<Ping[]> {
 
 /** Newest ping last. Cached so the page and the alert tick share one upstream call. */
 export async function fetchPings(): Promise<Ping[]> {
+  if (replaying()) return replayPings();
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.pings;
   inFlight ??= load()
     .then((pings) => {

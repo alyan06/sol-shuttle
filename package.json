@@ -13,7 +13,8 @@
     "tick:local": "node scripts/tick-loop.mjs",
     "postinstall": "node scripts/copy-map-worker.mjs",
     "dev:locked": "node scripts/dev-local.mjs --passcode letmein",
-    "dev:hosted": "next dev -p 3240"
+    "dev:hosted": "next dev -p 3240",
+    "dev:replay": "node scripts/dev-local.mjs --replay"
   },
   "dependencies": {
     "maplibre-gl": "^6.16.0",
