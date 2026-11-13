@@ -42,7 +42,9 @@ export function recordObservation(
   const startedNow = today === null || rolled;
 
   if (status !== 'live' || !ping) return { today: log, finished };
-  const second = tempeSecondOfDay(now);
+  // The position carries its own time. Using it, not the time of this check, keeps the log within
+  // a few seconds of what the bus did. A position from before midnight still counts as today.
+  const second = tempeSecondOfDay(tempeDayKey(ping.time) === log.day ? ping.time : now);
 
   if (ping.mph >= MOVING_MPH) {
     log.firstMove ??= second;

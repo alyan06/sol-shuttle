@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { feedStatus } from './snapshot.ts';
+import { ageCorrection, feedStatus } from './snapshot.ts';
 import type { Ping } from './types.ts';
 
 const NOW = 1_000_000_000;
@@ -22,5 +22,20 @@ describe('feedStatus', () => {
 
   it('gives up on a parked bus eventually', () => {
     assert.equal(feedStatus(ping(400, 0), NOW), 'stale');
+  });
+});
+
+describe('ageCorrection', () => {
+  it('takes the age of the position off the times for a moving bus', () => {
+    assert.equal(ageCorrection(ping(15, 25), NOW), 15);
+  });
+
+  it('leaves a parked bus alone: it has not gone anywhere since it reported', () => {
+    assert.equal(ageCorrection(ping(200, 0), NOW), 0);
+  });
+
+  it('stops growing once the position is too old to trust, and handles no position', () => {
+    assert.equal(ageCorrection(ping(300, 25), NOW), 60);
+    assert.equal(ageCorrection(null, NOW), 0);
   });
 });

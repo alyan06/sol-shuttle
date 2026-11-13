@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { appendDay, emptyHistory, recordObservation } from './history.ts';
-import { buildTimetable } from './timetable.ts';
+import { buildTimetable, typicalLoop } from './timetable.ts';
 import type { DayLog, Route, Snapshot } from './types.ts';
 
 // 2026-11-09 is a Monday. Tempe is UTC-7, so 15:00 UTC is 8:00 AM there.
@@ -71,6 +71,13 @@ describe('recordObservation', () => {
     assert.equal(today.visits.length, 1);
   });
 
+  it('logs when the bus did it, not when the check noticed', () => {
+    // The bus set off at 8:00:10; the check that sees it runs 25 seconds later.
+    const seen = MON_8AM + 35_000;
+    const late: Snapshot = { ...snap(seen, null), ping: { time: MON_8AM + 10_000, lat: 0, lng: 0, heading: 0, mph: 20, address: '' } };
+    assert.equal(recordObservation(null, late, route).today.firstMove, 8 * 3600 + 10);
+  });
+
   it('hands back the finished day when the date changes', () => {
     const monday = replay([[0, null]]);
     const next = recordObservation(monday, snap(MON_8AM + 24 * 60 * MIN, 'sol'), route);
@@ -134,5 +141,24 @@ describe('buildTimetable', () => {
     const partial: DayLog = { ...day('a', 1, []), firstMove: 16 * 3600, partial: true };
     const t = buildTimetable([partial, day('b', 1, []), day('c', 1, [])], 1);
     assert.equal(t.firstSec, 7 * 3600);
+  });
+});
+
+describe('typicalLoop', () => {
+  const day = (arrivals: number[], firstMove = 7 * 3600): DayLog => ({ day: 'a', weekday: 4, firstMove, lastMove: 19 * 3600, visits: arrivals.map((arr) => ({ stop: 'sol', arr, dep: arr + 240 })) });
+  const every = (minutes: number, count: number, from = 7 * 3600 + 600) => Array.from({ length: count }, (_, i) => from + i * minutes * 60);
+
+  it('is the usual gap between one bus and the next at a stop', () => {
+    assert.equal(typicalLoop([day(every(30, 9))]), 30 * 60);
+  });
+
+  it('does not count a break as a loop', () => {
+    const withBreak = [...every(30, 5), ...every(30, 5, 7 * 3600 + 600 + 4 * 1800 + 55 * 60)];
+    assert.equal(typicalLoop([day(withBreak)]), 30 * 60);
+  });
+
+  it('ignores a parked bus "arriving" before the first run, and waits for enough buses', () => {
+    assert.equal(typicalLoop([day([49 * 60, ...every(30, 8)])]), 30 * 60);
+    assert.equal(typicalLoop([day(every(30, 4))]), null);
   });
 });

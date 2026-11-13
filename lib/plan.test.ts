@@ -84,7 +84,7 @@ function plan(now: number, bus: LiveBus, more: Partial<PlanInput> & { ov?: Parti
 
 const ids = (p: ReturnType<typeof planDay>) => p.legs.map((l) => l.id);
 const leg = (p: ReturnType<typeof planDay>, id: string) => p.legs.find((l) => l.id === id)!;
-const timetable = (over: Partial<Timetable>): Timetable => ({ weekday: 1, daysSeen: 3, runs: true, firstSec: null, lastSec: null, lastSure: true, arrivals: {}, ...over });
+const timetable = (over: Partial<Timetable>): Timetable => ({ weekday: 1, daysSeen: 3, runs: true, firstSec: null, lastSec: null, lastSure: true, loopSec: null, arrivals: {}, ...over });
 
 describe('getting to class', () => {
   it('picks the latest bus that still makes the first class', () => {

@@ -116,6 +116,8 @@ export type Timetable = {
   /** Earliest end of service seen, when the bus parks for the night. */
   lastSec: number | null;
   lastSure: boolean;
+  /** Typical seconds between one bus and the next at the same stop, from every logged day. Null until there are enough. */
+  loopSec: number | null;
   arrivals: Record<string, TimetableSlot[]>;
 };
 

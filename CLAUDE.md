@@ -35,6 +35,14 @@ npm run tick:local  # runs the alert check every 30s against the dev server (nee
 - The loop has slack and the driver spends it in different places: 20s to 5 min at Gammage, 1 to 5 min at the Apache/McClintock light, 3 to 11 min at SoL. That's the limit on ETA accuracy, and why an ETA can drop by minutes at once. Don't treat the leave alert as a moment; it's a threshold.
 - The bus waits at SoL for minutes, in up to three spots: the east driveway, the back of the property, and the University Dr curb. Which one riders board at isn't known yet, so the SoL stop starts at the driveway and `holdM` keeps "Bus is here" on until it leaves the curb. `canCatch` counts the wait.
 
+## A full weekday (logged Thursday 2026-11-12)
+
+- First movement 6:59 AM, left SoL 7:02 AM, at Gammage 7:14. Last loop back at SoL 7:07 PM. Ends seen so far: Mon 7:01 PM, Tue 6:59 PM, Thu 7:07 PM, Fri 7:05 PM.
+- 22 loops in the day. The gap between buses at a stop was typically 31 min (20 to 45), shorter than the 35 min learned from Friday evening, and it drifts: there is no fixed clock timetable. `typicalLoop` measures it from the log and the planner uses that once there are enough buses.
+- Wednesday 2026-11-11 (Veterans Day) had no movement at all, with every check running. Holidays look like "no service" days in the history.
+- The last loop of the day waited at Gammage from 6:28 to 6:54 PM.
+- **Timing is corrected for the feed's delay.** A position is 5 to 20 seconds old when used. `ageCorrection` takes that off the arrival times of a moving bus, and the log stamps events with the position's own time, not the time of the check.
+
 ## Live (first deployed 2026-11-07, planner 2026-11-10)
 
 - **App:** https://alyan-sol-shuttle.vercel.app (Vercel project `alyan-sol-shuttle`, linked in `.vercel/`). Redeploy with `npx vercel deploy --prod`.

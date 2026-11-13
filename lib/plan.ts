@@ -157,7 +157,8 @@ export function busTimes(ctx: Pick<Ctx, 'now' | 'route' | 'live' | 'timetable' |
   const { now, route, live, timetable, midnight } = ctx;
   if (timetable?.runs === false) return [];
   const spare = ctx.prefs.bufferMinutes * 60;
-  const loop = route.loopSeconds * 1000;
+  // The loop learned from one evening is the fallback; days of logged buses say what it really is.
+  const loop = (timetable?.loopSec ?? route.loopSeconds) * 1000;
   const slots = timetable?.arrivals[stopId] ?? [];
   const times: BusTime[] = [];
 

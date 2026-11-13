@@ -5,6 +5,30 @@ const SAME_RUN_S = 6 * 60;
 const MIN_DAYS = 2;
 /** A run has to show up on this share of the days seen before it's trusted. */
 const MIN_SHARE = 0.6;
+/** A longer gap than this between buses is a break, not a loop. */
+const MAX_LOOP_S = 50 * 60;
+const MIN_LOOP_S = 15 * 60;
+const MIN_GAPS = 6;
+
+/** Arrivals at a stop once service has begun. A bus parked overnight can "arrive" at 1 AM without moving. */
+function arrivalsAt(day: DayLog, stop: string): number[] {
+  return day.visits.filter((v) => v.stop === stop && v.arr !== null && day.firstMove !== null && v.arr >= day.firstMove).map((v) => v.arr!);
+}
+
+/** How long one loop really takes: the usual gap between successive arrivals at the same stop. */
+export function typicalLoop(days: DayLog[]): number | null {
+  const gaps: number[] = [];
+  for (const day of days) {
+    for (const stop of new Set(day.visits.map((v) => v.stop))) {
+      const times = arrivalsAt(day, stop).sort((a, b) => a - b);
+      for (let i = 1; i < times.length; i++) {
+        const gap = times[i] - times[i - 1];
+        if (gap >= MIN_LOOP_S && gap <= MAX_LOOP_S) gaps.push(gap);
+      }
+    }
+  }
+  return gaps.length >= MIN_GAPS ? Math.round(median(gaps)) : null;
+}
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -44,7 +68,7 @@ export function buildTimetable(days: DayLog[], weekday: number, seenEnds: number
   if (ran.length >= MIN_DAYS) {
     const stops = new Set(ran.flatMap((d) => d.visits.map((v) => v.stop)));
     for (const stop of stops) {
-      const perDay = ran.map((d) => d.visits.filter((v) => v.stop === stop && v.arr !== null).map((v) => v.arr!));
+      const perDay = ran.map((d) => arrivalsAt(d, stop));
       const slots = recurringRuns(perDay);
       if (slots.length > 0) arrivals[stop] = slots;
     }
@@ -58,6 +82,7 @@ export function buildTimetable(days: DayLog[], weekday: number, seenEnds: number
     // The earliest end seen, not the typical one: the cost of trusting a late bus is a long walk home.
     lastSec: lasts.length > 0 ? Math.min(...lasts) : null,
     lastSure: lasts.length >= MIN_DAYS,
+    loopSec: typicalLoop(days),
     arrivals,
   };
 }
