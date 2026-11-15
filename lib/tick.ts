@@ -1,7 +1,7 @@
 import { evaluate, isWatching } from './alerts.ts';
 import { liveBus, timetableToday } from './day.ts';
 import { appendDay, recordObservation } from './history.ts';
-import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planDay, walkAlerts } from './plan.ts';
+import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planDay, walkAlerts, withinAlertWindow, type DayPlan } from './plan.ts';
 import { pushConfigured, sendPush } from './push.ts';
 import routeData from './route.json';
 import { fetchPings } from './samsara.ts';
@@ -34,8 +34,9 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
   let progress = tracking.progress;
   const planFired = tracking.planFired.filter((key) => key.startsWith(date));
   let followStop: string | null = null;
+  let plan: DayPlan | null = null;
   if (hasClasses(schedule)) {
-    const plan = planDay({
+    plan = planDay({
       now,
       schedule,
       route,
@@ -74,7 +75,8 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
     ? { ...settings.prefs, stopId: followStop, alerts: { ...settings.prefs.alerts, leave: false } }
     : // Watching by hand: the walk depends on which stop. SoL is from the apartment, Gammage a typical walk across campus.
       { ...settings.prefs, walkMinutes: stopWalkMinutes(settings.prefs, settings.prefs.stopId) };
-  const watching = followStop !== null || isWatching(now, settings.watchUntil, settings.prefs.dailyWatch);
+  const watchingByHand = isWatching(now, settings.watchUntil, settings.prefs.dailyWatch);
+  const watching = followStop !== null || watchingByHand;
   let alertState: AlertState = tracking;
   if (tracking.alertStopId !== prefs.stopId) {
     // A different stop: start from where the bus is now, so the switch itself announces nothing.
@@ -83,6 +85,9 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
   }
   const result = evaluate({ snapshot, route, prefs, state: alertState, watching });
   events.push(...result.events);
+  // Everything is still worked out and remembered, so nothing fires late when the window opens.
+  // Only what's sent to the phone is held to the hours around his classes.
+  const sending = withinAlertWindow(events, plan, now, watchingByHand);
 
   await save('tracking', {
     ...tracking,
@@ -94,9 +99,9 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
     planFired,
   });
 
-  if (events.length > 0 && pushConfigured() && settings.subscriptions.length > 0) {
+  if (sending.length > 0 && pushConfigured() && settings.subscriptions.length > 0) {
     const gone = new Set<string>();
-    for (const event of events) {
+    for (const event of sending) {
       for (const endpoint of await sendPush(settings.subscriptions, event)) gone.add(endpoint);
     }
     if (gone.size > 0) {
@@ -104,5 +109,5 @@ export async function runTick(now = Date.now()): Promise<{ status: string; sent:
       await save('settings', { ...fresh, subscriptions: fresh.subscriptions.filter((s) => !gone.has(s.endpoint)) });
     }
   }
-  return { status: snapshot.status, sent: events };
+  return { status: snapshot.status, sent: sending };
 }

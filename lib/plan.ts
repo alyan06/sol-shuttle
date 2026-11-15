@@ -27,8 +27,11 @@ const WATCH_LEAD_MS = 15 * MIN;
 const PING_LEAD_MS = 10 * MIN;
 /** Two bus times this close are the same bus, so it's only announced once. */
 const SAME_BUS_MS = 10 * MIN;
-/** With nobody saying they're home, the alerts stop this long after the last class. */
-const WATCH_MAX_MS = 5 * 60 * MIN;
+/** Alerts run from this long before the first class of the day to this long after the last. */
+export const ALERTS_BEFORE_MS = 2 * 60 * MIN;
+export const ALERTS_AFTER_MS = 60 * MIN;
+/** With nobody saying they're home, the bus-home alerts stop when the alert window does. */
+const WATCH_MAX_MS = ALERTS_AFTER_MS;
 /** A class counts as "just over" for this long. */
 const JUST_OVER_MS = 2 * MIN;
 /** Still worth heading to a class that started this recently. */
@@ -98,6 +101,8 @@ export type DayPlan = {
   eveningApplies: boolean;
   service: string | null;
   legs: Leg[];
+  /** When alerts may be sent today: around the classes being taken. Null on a day without any. */
+  alertWindow: { from: number; until: number } | null;
   /**
    * Where the app takes you to be for the ride home: the class that's ending or just ended, until
    * the next class starts or you say you're on the bus. Null in class, at home, or once you've said so.
@@ -359,6 +364,7 @@ export function planDay(input: PlanInput): DayPlan {
     eveningApplies: gymDay && !(onCampus && afterClass === 'gym'),
     service: null,
     legs: [],
+    alertWindow: null,
     homeWatch: null,
   };
   if (!home || !campus) return plan;
@@ -389,6 +395,10 @@ export function planDay(input: PlanInput): DayPlan {
   }
   if (timetable?.runs === false) plan.service = `No bus on ${DAY_NAMES[weekday]}s, going by the last ${timetable.daysSeen}.`;
   else if (ctx.lastMs !== null) plan.service = `Last bus parks around ${formatClock(ctx.lastMs)}${timetable?.lastSure ? '' : ' (seen once)'}.`;
+
+  if (taken.length > 0) {
+    plan.alertWindow = { from: at(taken[0].startMin) - ALERTS_BEFORE_MS, until: endOf(taken.at(-1)!) + ALERTS_AFTER_MS };
+  }
 
   const legs: Leg[] = [];
 
@@ -612,6 +622,18 @@ export function headsUpAlerts(plan: DayPlan, route: Route, now: number, fired: s
       title: `Leave at ${formatClock(leg.start!)} for ${leg.goal}`,
       body: `${busLine(leg, route)}${leg.warn ? ` ${leg.warn}` : ''}`,
     }));
+}
+
+/**
+ * Which alerts actually go out. With classes set up, the phone only hears about buses around his
+ * time on campus: two hours before the first class to an hour after the last. Outside that, only a
+ * watch he started by hand gets through, and only for the bus he's watching.
+ */
+export function withinAlertWindow<T extends { kind: string }>(events: T[], plan: DayPlan | null, now: number, watchingByHand: boolean): T[] {
+  if (plan === null) return events;
+  const window = plan.alertWindow;
+  if (window && now >= window.from && now <= window.until) return events;
+  return watchingByHand ? events.filter((event) => event.kind === 'leave' || event.kind === 'arrived' || event.kind === 'departed') : [];
 }
 
 export type PlanAnswer = { tone: 'calm' | 'go' | 'here' | 'unknown'; lead: string; headline: string; detail: string };

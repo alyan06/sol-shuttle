@@ -10,8 +10,8 @@ const ALERTS: { key: keyof AlertPrefs; label: string; hint: string; planHint?: s
   { key: 'leave', label: 'Time to leave', hint: 'While watching', planHint: 'A heads-up, then the moment to go, for each planned bus' },
   { key: 'afterClass', label: 'Bus home after class', hint: 'Needs your classes', planHint: 'From 15 min before each class ends, then every bus after your last one' },
   { key: 'atStop', label: 'Bus at my stop', hint: 'While watching', planHint: 'For each planned bus, and while watching' },
-  { key: 'notRunning', label: 'Not running', hint: 'Always' },
-  { key: 'firstLast', label: 'First and last bus', hint: 'Always' },
+  { key: 'notRunning', label: 'Not running', hint: 'Always', planHint: 'Only around your classes' },
+  { key: 'firstLast', label: 'First and last bus', hint: 'Always', planHint: 'Only around your classes' },
 ];
 
 const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -175,6 +175,9 @@ export default function AlertsPanel({ settings, hasStops, planning }: Props) {
 
       <fieldset className="group">
         <legend>Send me</legend>
+        {planning && (
+          <p className="note">On class days, alerts run from 2 hours before your first class to 1 hour after your last. Outside that, and on days without classes, your phone stays quiet unless you tap Watch.</p>
+        )}
         {ALERTS.map(({ key, label, hint, planHint }) => (
           <label className="toggle" key={key}>
             <span>

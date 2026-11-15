@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planAnswer, planDay, walkAlerts, type LiveBus, type PlanInput } from './plan.ts';
+import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planAnswer, planDay, walkAlerts, withinAlertWindow, type LiveBus, type PlanInput } from './plan.ts';
 import { defaultSchedule } from './schedule.ts';
 import { formatClock } from './time.ts';
 import type { DayOverride, Route, Schedule, Timetable } from './types.ts';
@@ -397,10 +397,13 @@ describe('the ride home, class by class', () => {
     fired = [...fired, ...keys(second, b)];
     assert.deepEqual(busHomeAlerts(plan(T(12, 14), live(31)), T(12, 14), fired), []);
 
-    // And the one after that, still measured from Coor Hall.
-    const third = plan(T(12, 47), live(33));
-    assert.equal(busHomeAlerts(third, T(12, 47), fired)[0].title, 'After MAT 267: bus home 1:05 PM');
-    assert.equal(third.homeWatch!.walkMin, 7);
+    // Still measured from Coor Hall, an hour on.
+    assert.equal(plan(T(12, 44), live(1)).homeWatch!.walkMin, 7);
+
+    // 12:47: more than an hour after class. The 1:05 bus is not announced.
+    const late = plan(T(12, 47), live(33));
+    assert.equal(late.homeWatch, null);
+    assert.deepEqual(busHomeAlerts(late, T(12, 47), fired), []);
   });
 
   it('never takes the ride home as caught on its own', () => {
@@ -424,9 +427,9 @@ describe('the ride home, class by class', () => {
     assert.deepEqual(ids(p), ['class:c1', 'class:c2']);
   });
 
-  it('gives up by itself hours after the last class', () => {
-    assert.ok(plan(T(16, 0), live(20)).homeWatch);
-    assert.equal(plan(T(17, 0), live(20)).homeWatch, null);
+  it('gives up by itself an hour after the last class', () => {
+    assert.ok(plan(T(12, 40), live(20)).homeWatch);
+    assert.equal(plan(T(12, 50), live(20)).homeWatch, null);
   });
 });
 
@@ -476,5 +479,47 @@ describe('before class', () => {
 
   it('says how early the bus gets you to the room', () => {
     assert.equal(leg(plan(T(8), live(10)), 'walk-in').note, 'In the room about 22 min before CSE 205.');
+  });
+});
+
+describe('alerts only around time on campus', () => {
+  // Monday: classes 9:00 to 11:45, so alerts run 7:00 AM to 12:45 PM.
+  const all = [{ kind: 'plan' }, { kind: 'first-bus' }, { kind: 'not-running' }, { kind: 'arrived' }, { kind: 'leave' }];
+  const kinds = (now: number, byHand = false, more: Parameters<typeof plan>[2] = {}) => withinAlertWindow(all, plan(now, live(10), more), now, byHand).map((e) => e.kind);
+
+  it('runs from two hours before the first class to an hour after the last', () => {
+    const window = plan(T(8), live(10)).alertWindow!;
+    assert.deepEqual([clock(window.from), clock(window.until)], ['7:00 AM', '12:45 PM']);
+    assert.equal(kinds(T(7, 0)).length, 5);
+    assert.equal(kinds(T(10, 0)).length, 5);
+    assert.equal(kinds(T(12, 45)).length, 5);
+  });
+
+  it('is silent before and after, including the first bus of the morning and the evening gym trip', () => {
+    assert.deepEqual(kinds(T(6, 59)), []);
+    assert.deepEqual(kinds(T(12, 46)), []);
+    assert.deepEqual(kinds(T(17, 0)), []);
+  });
+
+  it('follows the classes actually being taken', () => {
+    // Skipping the first class moves the start to two hours before the second.
+    assert.deepEqual(kinds(T(7, 30), false, { ov: { skipped: ['c1'] } }), []);
+    assert.equal(kinds(T(8, 30), false, { ov: { skipped: ['c1'] } }).length, 5);
+    // A class that let out early ends the window an hour after it really ended.
+    assert.deepEqual(kinds(T(12, 30), false, { ov: { outEarly: { c2: T(11, 20) } } }), []);
+  });
+
+  it('is silent all day when there are no classes, or all of them are skipped', () => {
+    assert.equal(plan(T(10, 0, 4), live(10), { day: 4 }).alertWindow, null);
+    assert.deepEqual(kinds(T(10, 0, 4), false, { day: 4 }), []);
+    assert.deepEqual(kinds(T(10), false, { ov: { skipped: ['c1', 'c2'] } }), []);
+  });
+
+  it('still lets a watch started by hand through, for that bus only', () => {
+    assert.deepEqual(kinds(T(17, 0), true), ['arrived', 'leave']);
+  });
+
+  it('changes nothing when no classes are set up at all', () => {
+    assert.equal(withinAlertWindow(all, null, T(3), false).length, 5);
   });
 });
