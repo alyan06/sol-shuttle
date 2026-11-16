@@ -40,7 +40,7 @@ function lastSeenText(now: number, lastSeenAt: number | null): string {
 }
 
 /** Turns the raw feed into the one thing to do. Never shows a time it can't stand behind. */
-export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSince, onRoute }: Input): Answer {
+export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSince }: Input): Answer {
   if (status === 'offline') {
     return { tone: 'unknown', lead: 'Right now', headline: 'Not running', detail: lastSeenText(now, lastSeenAt) };
   }
@@ -58,9 +58,12 @@ export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSi
   if (!stop) {
     return { tone: 'unknown', lead: 'To get a time', headline: 'Pick your stop', detail: 'Choose where you catch the bus.' };
   }
-  if (!onRoute || !eta) {
-    return { tone: 'unknown', lead: 'Right now', headline: 'Off route', detail: "The bus isn't on its usual loop, so there's no reliable time." };
+  if (!eta) {
+    return { tone: 'unknown', lead: 'Right now', headline: 'Off route', detail: "The bus is away from its usual area, so there's no time to give." };
   }
+  // On other streets than usual the time comes from distance alone, and says so.
+  const around = eta.rough ? 'roughly' : 'around';
+  const roughNote = eta.rough ? ' The bus is taking a different route, so this is a rough time.' : '';
   if (eta.atStop) {
     return { tone: 'here', lead: `At ${stop.name}`, headline: 'Bus is here', detail: `If you miss it, the next one is about ${minutes(route.loopSeconds)} min later.` };
   }
@@ -77,11 +80,11 @@ export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSi
       tone: 'calm',
       lead: 'For the next bus, leave in',
       headline: `${minutes(nextLeave)} min`,
-      detail: `You'd miss the one arriving around ${arrival}. ${walkText}.`,
+      detail: `You'd miss the one arriving ${around} ${arrival}. ${walkText}.${roughNote}`,
     };
   }
   if (leaveIn <= NOW_WINDOW_SECONDS) {
-    return { tone: 'go', lead: `Bus reaches ${stop.name} around ${arrival}`, headline: 'Leave now', detail: `${walkText}.` };
+    return { tone: 'go', lead: `Bus reaches ${stop.name} ${around} ${arrival}`, headline: 'Leave now', detail: `${walkText}.${roughNote}` };
   }
-  return { tone: 'calm', lead: 'Leave in', headline: `${minutes(leaveIn)} min`, detail: `Bus reaches ${stop.name} around ${arrival}. ${walkText}.` };
+  return { tone: 'calm', lead: 'Leave in', headline: `${minutes(leaveIn)} min`, detail: `Bus reaches ${stop.name} ${around} ${arrival}. ${walkText}.${roughNote}` };
 }

@@ -34,7 +34,13 @@ export type Located = { s: number; t: number; offsetM: number };
 
 export type FeedStatus = 'live' | 'stale' | 'offline';
 
-export type StopEta = { stopId: string; seconds: number; atStop: boolean };
+export type StopEta = {
+  stopId: string;
+  seconds: number;
+  atStop: boolean;
+  /** Worked out from distance alone, because the bus is on roads the route wasn't learned on. */
+  rough?: true;
+};
 
 export type Snapshot = {
   now: number;
@@ -100,6 +106,8 @@ export type DayLog = {
   visits: Visit[];
   /** Logging began after service had started, so firstMove isn't the real first bus. */
   partial?: true;
+  /** Where the bus went when it left the learned route: [second of day, lat, lng]. Kept for a week, to learn the detour from. */
+  detour?: [number, number, number][];
 };
 
 export type History = { days: DayLog[] };

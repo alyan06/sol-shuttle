@@ -1,4 +1,4 @@
-import { angleBetween, bearing, projectOntoSegment } from './geo.ts';
+import { angleBetween, bearing, metresBetween, projectOntoSegment } from './geo.ts';
 import type { Located, Ping, Route, Stop, StopEta } from './types.ts';
 
 const MAX_OFF_ROUTE_M = 70;
@@ -49,4 +49,71 @@ export function etaToStop(route: Route, located: Located, stop: Stop): StopEta {
 
 export function etasFor(route: Route, located: Located | null): StopEta[] {
   return located ? route.stops.map((stop) => etaToStop(route, located, stop)) : [];
+}
+
+/** This far outside the area the loop covers, the bus isn't on a detour: it has gone somewhere else. */
+const DETOUR_MARGIN_M = 500;
+const NEAR_STOP_M = 60;
+const M_PER_DEG = 111_320;
+/**
+ * On a detour the estimate leans fast. Measured twice: back along University Dr the bus beat the
+ * usual pace by about 30%, and out via Rural it was slower. A time that's too early costs a short
+ * wait at the stop; one that's too late costs the bus.
+ */
+const DETOUR_PACE = 1.25;
+
+/** Metres by road between two points on a street grid: along one street, then along the other. */
+function gridMetres(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const northSouth = Math.abs(a.lat - b.lat) * M_PER_DEG;
+  const eastWest = Math.abs(a.lng - b.lng) * M_PER_DEG * Math.cos((a.lat * Math.PI) / 180);
+  return northSouth + eastWest;
+}
+
+/** The bus's usual pace between stops, lights and turns included, in metres a second. */
+function cruiseSpeed(route: Route): number {
+  const length = route.path[route.path.length - 1].s;
+  const waiting = route.stops.reduce((sum, stop) => sum + stop.dwellSeconds, 0);
+  return length / Math.max(60, route.loopSeconds - waiting);
+}
+
+/**
+ * Arrival times for a bus that has left the learned loop but is still in the area: the driver
+ * took other streets. The next stop is whichever follows the last place it was on the loop; the
+ * time to it is the distance by road at a little over the bus's usual pace. The stop after that adds the usual
+ * time between the two. Rough by nature, and marked so. Empty when the bus is somewhere else entirely.
+ */
+export function roughEtas(route: Route, ping: Ping, prevS: number | null): StopEta[] {
+  const { path, stops } = route;
+  if (path.length < 2 || stops.length === 0) return [];
+
+  const lats = path.map((p) => p.lat);
+  const lngs = path.map((p) => p.lng);
+  const latMargin = DETOUR_MARGIN_M / M_PER_DEG;
+  const lngMargin = latMargin / Math.cos((ping.lat * Math.PI) / 180);
+  const inArea =
+    ping.lat >= Math.min(...lats) - latMargin &&
+    ping.lat <= Math.max(...lats) + latMargin &&
+    ping.lng >= Math.min(...lngs) - lngMargin &&
+    ping.lng <= Math.max(...lngs) + lngMargin;
+  if (!inArea) return [];
+
+  const ordered = [...stops].sort((a, b) => a.s - b.s);
+  let next: Stop;
+  if (prevS !== null) {
+    next = ordered.find((stop) => stop.s > prevS) ?? ordered[0];
+  } else if (ping.mph >= MOVING_MPH) {
+    // No memory of where it left the loop: it's heading for the stop it's pointing at.
+    next = [...ordered].sort((a, b) => angleBetween(ping.heading, bearing(ping, a)) - angleBetween(ping.heading, bearing(ping, b)))[0];
+  } else {
+    next = [...ordered].sort((a, b) => metresBetween(ping, a) - metresBetween(ping, b))[0];
+  }
+
+  const atNext = metresBetween(ping, next) <= NEAR_STOP_M;
+  const toNext = atNext ? 0 : gridMetres(ping, next) / (cruiseSpeed(route) * DETOUR_PACE);
+  return ordered.map((stop) => ({
+    stopId: stop.id,
+    seconds: stop === next ? toNext : toNext + forward(next.t, stop.t, route.loopSeconds),
+    atStop: stop === next && atNext,
+    rough: true as const,
+  }));
 }

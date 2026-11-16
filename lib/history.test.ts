@@ -78,6 +78,21 @@ describe('recordObservation', () => {
     assert.equal(recordObservation(null, late, route).today.firstMove, 8 * 3600 + 10);
   });
 
+  it('notes where the bus went when it left the loop, and only while it is moving', () => {
+    const off = (minute: number, mph: number): Snapshot => {
+      const base = snap(MON_8AM + minute * MIN, null, { offRoute: true });
+      return { ...base, ping: { ...base.ping!, lat: 33.421987, lng: -111.926812, mph } };
+    };
+    let today = recordObservation(null, off(0, 20), route).today;
+    today = recordObservation(today, off(1, 0), route).today;
+    today = recordObservation(today, off(2, 25), route).today;
+    assert.deepEqual(today.detour, [
+      [8 * 3600, 33.42199, -111.92681],
+      [8 * 3600 + 120, 33.42199, -111.92681],
+    ]);
+    assert.deepEqual(today.visits, []);
+  });
+
   it('hands back the finished day when the date changes', () => {
     const monday = replay([[0, null]]);
     const next = recordObservation(monday, snap(MON_8AM + 24 * 60 * MIN, 'sol'), route);
@@ -98,6 +113,17 @@ describe('appendDay', () => {
     const history = appendDay(appendDay(emptyHistory, idle), idle);
     assert.equal(history.days.length, 1);
     assert.deepEqual(history.days[0].visits, []);
+  });
+});
+
+describe('detours in the history', () => {
+  it('keeps the path for the newest week only', () => {
+    let history = emptyHistory;
+    for (let i = 1; i <= 9; i++) {
+      history = appendDay(history, { day: `2026-11-${String(i).padStart(2, '0')}`, weekday: i % 7, firstMove: 25200, lastMove: 68400, visits: [], detour: [[30000, 33.4, -111.9]] });
+    }
+    assert.deepEqual(history.days.map((d) => Boolean(d.detour)), [false, false, true, true, true, true, true, true, true]);
+    assert.equal(history.days[0].firstMove, 25200);
   });
 });
 

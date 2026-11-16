@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { etaToStop, locate } from './track.ts';
+import { etaToStop, locate, roughEtas } from './track.ts';
 import type { Ping, Route, Stop } from './types.ts';
 
 // Out along a street heading east and back along the same street heading west.
@@ -78,5 +78,62 @@ describe('etaToStop', () => {
   it('does not stretch the approach to a stop that holds', () => {
     const holding: Stop = { ...stopB, holdM: 130 };
     assert.equal(etaToStop(route, { s: HALF - 120, t: 260, offsetM: 2 }, holding).atStop, false);
+  });
+});
+
+describe('roughEtas', () => {
+  // A rectangular loop like the real one: west along the north street, back east along the south street.
+  // 1 km wide, 400 m tall, stops at the east end (home, loop start) and the west end.
+  const N = 33.422;
+  const S = N - 400 / 111_320;
+  const E = -111.905;
+  const W = E - 1000 / (111_320 * Math.cos((N * Math.PI) / 180));
+  const corners = [
+    { lat: N, lng: E, s: 0, t: 0 },
+    { lat: N, lng: W, s: 1000, t: 160 },
+    { lat: S, lng: W, s: 1400, t: 224 },
+    { lat: S, lng: E, s: 2400, t: 384 },
+    { lat: N, lng: E, s: 2800, t: 448 },
+  ];
+  const west: Stop = { id: 'west', name: 'West', lat: (N + S) / 2, lng: W, s: 1200, t: 192, dwellSeconds: 60 };
+  const home: Stop = { id: 'home', name: 'Home', lat: N, lng: E, s: 2790, t: 446, dwellSeconds: 120 };
+  const loop: Route = { generatedAt: null, loopsObserved: 3, loopSeconds: 448 + 180, path: corners, stops: [west, home] };
+  // Usual pace: 2800 m in 628 s less 180 s of waiting = 6.25 m/s.
+  const at = (lat: number, lng: number, heading: number, mph = 20): Ping => ({ time: 0, lat, lng, heading, mph, address: '' });
+  const midLng = (E + W) / 2;
+  const midLat = (N + S) / 2;
+
+  it('times the next stop by road distance, a little faster than the usual pace, and the one after from the usual gap', () => {
+    // Left the loop after the west stop and is cutting back along a street through the middle: 500 m west of home, 200 m south.
+    const etas = roughEtas(loop, at(midLat, midLng, 90), 1300);
+    const toHome = etas.find((e) => e.stopId === 'home')!;
+    const toWest = etas.find((e) => e.stopId === 'west')!;
+    assert.ok(Math.abs(toHome.seconds - 700 / (6.25 * 1.25)) < 2);
+    assert.equal(toHome.rough, true);
+    // West comes after home: home's time plus the usual time from home round to west.
+    assert.ok(Math.abs(toWest.seconds - (toHome.seconds + (192 - 446 + 628))) < 2);
+  });
+
+  it('goes by where the bus left the loop, not by which stop is nearer', () => {
+    // Same spot, but it left the loop before the west stop: west is next, though home is no further.
+    const etas = roughEtas(loop, at(midLat, midLng, 270), 300);
+    assert.ok(etas.find((e) => e.stopId === 'west')!.seconds < etas.find((e) => e.stopId === 'home')!.seconds);
+  });
+
+  it('with no memory of the loop, heads for the stop the bus is pointing at', () => {
+    const east = roughEtas(loop, at(midLat, midLng, 90), null);
+    assert.ok(east.find((e) => e.stopId === 'home')!.seconds < east.find((e) => e.stopId === 'west')!.seconds);
+    const west2 = roughEtas(loop, at(midLat, midLng, 270), null);
+    assert.ok(west2.find((e) => e.stopId === 'west')!.seconds < west2.find((e) => e.stopId === 'home')!.seconds);
+  });
+
+  it('says the bus is at the stop once it is right beside it', () => {
+    const etas = roughEtas(loop, at(N + 0.0002, E, 0, 3), 2000);
+    assert.deepEqual(etas.find((e) => e.stopId === 'home'), { stopId: 'home', seconds: 0, atStop: true, rough: true });
+  });
+
+  it('gives no time for a bus that has left the area altogether', () => {
+    assert.deepEqual(roughEtas(loop, at(N + 0.02, E, 0), 1300), []);
+    assert.deepEqual(roughEtas(loop, at(N, E + 0.02, 90), 1300), []);
   });
 });

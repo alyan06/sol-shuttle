@@ -3,6 +3,9 @@ import type { DayLog, History, Route, Snapshot } from './types.ts';
 
 const MOVING_MPH = 4;
 const KEEP_DAYS = 56;
+/** Detour paths are bulky, so only the newest days keep theirs. */
+const KEEP_DETOUR_DAYS = 7;
+const MAX_DETOUR_POINTS = 300;
 /** Further than this between two checks and the positions aren't one continuous drive. */
 const MAX_STEP_M = 1500;
 
@@ -52,7 +55,15 @@ export function recordObservation(
   }
 
   // Without a place on the loop there's no saying whether it left a stop, so visits stay as they are.
-  if (snapshot.located === null) return { today: log, finished };
+  // Where it went instead is noted, so the detour can be learned once it's been seen a few times.
+  if (snapshot.located === null) {
+    const detour = log.detour ?? [];
+    const fresh = detour.length === 0 || detour[detour.length - 1][0] !== second;
+    if (ping.mph >= MOVING_MPH && fresh && detour.length < MAX_DETOUR_POINTS) {
+      log.detour = [...detour, [second, Math.round(ping.lat * 1e5) / 1e5, Math.round(ping.lng * 1e5) / 1e5]];
+    }
+    return { today: log, finished };
+  }
 
   const length = route.path.at(-1)?.s ?? 0;
   const s = snapshot.located.s;
@@ -77,5 +88,12 @@ export function recordObservation(
 /** Files a finished day. A day with no movement keeps only the fact that the bus didn't run. */
 export function appendDay(history: History, day: DayLog): History {
   const slim: DayLog = day.firstMove === null ? { ...day, visits: [] } : day;
-  return { days: [...history.days.filter((d) => d.day !== day.day), slim].slice(-KEEP_DAYS) };
+  const days = [...history.days.filter((d) => d.day !== day.day), slim].slice(-KEEP_DAYS);
+  return {
+    days: days.map((d, i) => {
+      if (i >= days.length - KEEP_DETOUR_DAYS || !d.detour) return d;
+      const { detour: _old, ...rest } = d;
+      return rest;
+    }),
+  };
 }

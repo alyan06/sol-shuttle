@@ -222,6 +222,7 @@ export default function Tracker({ route }: { route: Route }) {
   // Built from the bus's place on the loop: Samsara's street addresses are often a block or two off.
   let caption = out ? `Parked since ${formatSince(parkedSince!, data!.now)}` : 'Last known position';
   if (live && stoppedAt) caption = `Stopped at ${stoppedAt.name}`;
+  else if (live && nextStop && data!.located === null) caption = `On a different route, heading to ${nextStop.name}`;
   else if (live && nextStop) caption = `${moving ? `${Math.round(data!.ping!.mph)} mph` : 'Waiting'}, heading to ${nextStop.name}`;
   else if (live) caption = moving ? `${Math.round(data!.ping!.mph)} mph` : 'Stopped';
 
@@ -323,13 +324,15 @@ export default function Tracker({ route }: { route: Route }) {
               return (
                 <li key={item.stopId} data-selected={item.stopId === prefs.stopId}>
                   <span className="stop-name">{stop.name}</span>
-                  <span className="stop-time">{item.atStop ? 'Here now' : formatClock(data!.now + item.seconds * 1000)}</span>
+                  <span className="stop-time">{item.atStop ? 'Here now' : `${item.rough ? 'about ' : ''}${formatClock(data!.now + item.seconds * 1000)}`}</span>
                 </li>
               );
             })}
           </ol>
           <p className="note">
-            Times are estimates from {route.loopsObserved} recorded {route.loopsObserved === 1 ? 'loop' : 'loops'}.
+            {upcoming.some((item) => item.rough)
+              ? 'The bus is taking a different route, so these are rough times from how far away it is.'
+              : `Times are estimates from ${route.loopsObserved} recorded ${route.loopsObserved === 1 ? 'loop' : 'loops'}.`}
           </p>
         </section>
       )}

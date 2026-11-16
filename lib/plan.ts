@@ -18,6 +18,8 @@ import type {
 const MIN = 60_000;
 /** A check can land this long after the moment to leave and still count as "now". */
 const LEAVE_GRACE_MS = 75_000;
+/** A time worked out from distance alone, on a detour, carries this much more doubt. */
+const ROUGH_EXTRA_S = 180;
 /** Each loop further ahead adds this much doubt to a time worked out from the loop length. */
 const DRIFT_PER_LOOP_S = 180;
 const SERVICE_SLACK_MS = 5 * MIN;
@@ -170,10 +172,11 @@ export function busTimes(ctx: Pick<Ctx, 'now' | 'route' | 'live' | 'timetable' |
   const eta = live && live.status === 'live' && !live.parked ? live.etas.find((e) => e.stopId === stopId) : undefined;
   if (eta) {
     const base = now + eta.seconds * 1000;
-    times.push({ at: base, plusMinus: eta.atStop ? 0 : spare, source: 'live', here: eta.atStop });
+    const doubt = eta.rough ? spare + ROUGH_EXTRA_S : spare;
+    times.push({ at: base, plusMinus: eta.atStop ? 0 : doubt, source: eta.rough ? 'estimate' : 'live', here: eta.atStop });
     const loopsAhead = slots.length > 0 ? 1 : 3;
     for (let k = 1; k <= loopsAhead; k++) {
-      times.push({ at: base + k * loop, plusMinus: spare + k * DRIFT_PER_LOOP_S, source: 'estimate', here: false });
+      times.push({ at: base + k * loop, plusMinus: doubt + k * DRIFT_PER_LOOP_S, source: 'estimate', here: false });
     }
   }
 

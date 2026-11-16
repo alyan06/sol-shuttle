@@ -1,4 +1,4 @@
-import { etasFor, locate } from './track.ts';
+import { etasFor, locate, roughEtas } from './track.ts';
 import type { FeedStatus, Ping, Route, Snapshot } from './types.ts';
 
 /** Samsara reports every ~6s while the bus moves. Past this, a position is too old to time a walk by. */
@@ -31,6 +31,8 @@ export function buildSnapshot(route: Route, pings: Ping[], now: number, prevS: n
   const ping = pings.at(-1) ?? null;
   const located = ping ? locate(route, ping, prevS) : null;
   const used = ageCorrection(ping, now);
-  const etas = etasFor(route, located).map((eta) => (eta.atStop ? eta : { ...eta, seconds: Math.max(0, eta.seconds - used) }));
+  // Off the learned loop there's still a time to give, from distance alone.
+  const timed = located ? etasFor(route, located) : ping ? roughEtas(route, ping, prevS) : [];
+  const etas = timed.map((eta) => (eta.atStop ? eta : { ...eta, seconds: Math.max(0, eta.seconds - used) }));
   return { now, status: feedStatus(ping, now), ping, located, etas };
 }

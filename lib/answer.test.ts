@@ -80,6 +80,10 @@ describe('answerFor', () => {
 
   it('never shows a time when the bus is off its loop', () => {
     assert.equal(ask(null, { onRoute: false }).headline, 'Off route');
+    // On a detour there's still a time, flagged as rough.
+    const rough = ask(600, { onRoute: false, eta: { stopId: 'home', seconds: 600, atStop: false, rough: true } });
+    assert.equal(rough.headline, '3 min');
+    assert.match(rough.detail, /roughly .* different route, so this is a rough time/);
   });
 
   it('asks for a stop, and explains while the route is being learned', () => {
