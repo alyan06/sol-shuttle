@@ -4,7 +4,7 @@ import { TopBar } from '@/components/AppShell';
 
 export const metadata: Metadata = { title: 'Privacy' };
 
-const UPDATED = 'November 16, 2026';
+const UPDATED = 'November 17, 2026';
 
 export default function PrivacyPage() {
   const contact = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
@@ -49,10 +49,15 @@ export default function PrivacyPage() {
         <h2>What it never collects</h2>
         <ul>
           <li>Your location. The app never asks for it. Where you are is worked out from your schedule alone.</li>
-          <li>Anything for advertising. There are no ads, no analytics and no tracking of what you do in the app.</li>
+          <li>Anything for advertising. There are no ads, and nothing follows you to other sites.</li>
           <li>Anything about the driver. Only the bus&apos;s position is read from the apartment&apos;s tracker.</li>
         </ul>
         <p>The app sets one cookie, which keeps you signed in. It holds no personal details.</p>
+
+        <h2>Visit counts</h2>
+        <p>
+          To see how many people use the app, it counts page views with Vercel Web Analytics. For each page opened, that records the page (for example &quot;/schedule&quot;, never anything after a &quot;?&quot;), the site that linked to it, and the rough country, browser and kind of device. It sets no cookie and keeps no account, name or email, so a visit can&apos;t be tied to you or to your classes. Vercel tells one visitor from another only within a day, using a scrambled code it throws away at midnight.
+        </p>
 
         <h2>Who can see it</h2>
         <p>

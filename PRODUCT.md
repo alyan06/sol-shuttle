@@ -21,7 +21,7 @@ Samsara's fleet-admin look (dark navy chrome around a map that says nothing abou
 - Never overstate certainty. Estimates are labelled, and stale or missing data says so plainly instead of showing a confident number.
 - Silence is a feature. Alerts fire once, when they change what someone should do, and only around their time on campus.
 - The map supports the answer; it does not replace it.
-- Take as little as possible. No location, no tracking. A person's classes are theirs alone and one tap erases them.
+- Take as little as possible. No location, no tracking; the only counting is cookieless page views. A person's classes are theirs alone and one tap erases them.
 
 ## Accessibility & Inclusion
 WCAG 2.2 AA. Legible in direct sunlight, so contrast is treated as a hard floor. Light and dark, by the person's choice. Full reduced-motion support. Status is never carried by colour alone.

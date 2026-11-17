@@ -3,6 +3,7 @@ import { Bricolage_Grotesque } from 'next/font/google';
 import type { ReactNode } from 'react';
 import { AccountProvider } from '@/components/Account';
 import AppShell from '@/components/AppShell';
+import VisitCounter from '@/components/VisitCounter';
 import { THEME_SCRIPT } from '@/lib/theme.ts';
 import './globals.css';
 
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <AccountProvider>
           <AppShell>{children}</AppShell>
         </AccountProvider>
+        <VisitCounter />
       </body>
     </html>
   );
