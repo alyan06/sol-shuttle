@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Bricolage_Grotesque } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { Analytics } from '@vercel/analytics/next';
 import { AccountProvider } from '@/components/Account';
 import AppShell from '@/components/AppShell';
 import { THEME_SCRIPT } from '@/lib/theme.ts';
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <AccountProvider>
           <AppShell>{children}</AppShell>
         </AccountProvider>
+        <Analytics />
       </body>
     </html>
   );
