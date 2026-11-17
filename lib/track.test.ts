@@ -183,3 +183,15 @@ describe('locate, stopped', () => {
     assert.ok(Math.abs(locate(route, stopped(nearB), HALF - 30, 270)!.s - (HALF - 18.5)) < 5);
   });
 });
+
+describe('a stop the bus sometimes waits short of', () => {
+  it('counts the bus as there from the lead distance on', () => {
+    // Seen live: in the late afternoon the bus waited 110 m before the usual spot and turned round from there.
+    const early: Stop = { ...stopB, leadM: 150 };
+    const short = locate(route, ping(EAST - 0.0012, 90, 0), null)!; // about 110 m before B
+    assert.equal(etaToStop(route, short, stopB).atStop, false);
+    assert.deepEqual(etaToStop(route, short, early), { stopId: 'b', seconds: 0, atStop: true });
+    const further = locate(route, ping(EAST - 0.002, 90, 0), null)!; // about 185 m before
+    assert.equal(etaToStop(route, further, early).atStop, false);
+  });
+});

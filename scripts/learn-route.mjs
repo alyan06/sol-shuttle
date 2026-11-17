@@ -196,7 +196,7 @@ function buildRoute(loops) {
       path: path.map((p) => ({ lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6), s: Math.round(p.s), t: Math.round(p.t) })),
       stops: stops
         .sort((a, b) => a.s - b.s)
-        .map(({ id, name, lat, lng, s, t, dwellSeconds, holdM }) => ({ id, name, lat, lng, s: Math.round(s), t: Math.round(t), dwellSeconds, ...(holdM ? { holdM } : {}) })),
+        .map(({ id, name, lat, lng, s, t, dwellSeconds, holdM, leadM }) => ({ id, name, lat, lng, s: Math.round(s), t: Math.round(t), dwellSeconds, ...(holdM ? { holdM } : {}), ...(leadM ? { leadM } : {}) })),
     },
     candidates,
   };

@@ -14,7 +14,7 @@ function forward(a: number, b: number, length: number): number {
 
 /** Whether a place on the loop counts as being at this stop: just before it, or anywhere it waits. */
 function withinStop(s: number, stop: Stop, length: number): boolean {
-  return forward(s, stop.s, length) <= AT_STOP_M || forward(stop.s, s, length) <= (stop.holdM ?? AT_STOP_M);
+  return forward(s, stop.s, length) <= (stop.leadM ?? AT_STOP_M) || forward(stop.s, s, length) <= (stop.holdM ?? AT_STOP_M);
 }
 
 /**

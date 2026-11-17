@@ -20,6 +20,8 @@ export type Stop = {
   dwellSeconds: number;
   /** Metres past the stop the bus can still be boarded, when it waits a little further on. */
   holdM?: number;
+  /** How far before the stop the bus may already be waiting, in metres along the loop. */
+  leadM?: number;
 };
 
 export type Route = {
