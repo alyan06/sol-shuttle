@@ -1,4 +1,4 @@
-import { CAMPUS, HOME, allPlaces, classesOn, walkMinutes } from './schedule.ts';
+import { CAMPUS, CAMPUS_WALK_DEFAULT_MIN, HOME, allPlaces, classesOn, walkMinutes } from './schedule.ts';
 import { formatClock, tempeDayKey, tempeMidnight, tempeWeekday } from './time.ts';
 import type {
   ClassBlock,
@@ -69,6 +69,9 @@ export type Leg = {
   /** Where a bus leg finally gets you, for the summary line. */
   goal?: string;
   classId?: string;
+  /** Legs of a one-off trip planned today: which trip, and what was asked for. */
+  tripId?: string;
+  tripLabel?: string;
   /** Time on campus that isn't a class. */
   visit?: boolean;
   room?: string;
@@ -267,10 +270,10 @@ function homeBuses(ctx: Ctx, readyAt: number, walkToStop: number) {
     .filter((x) => x.leaveAt >= earliest - LEAVE_GRACE_MS);
 }
 
-function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number }): Trip {
+function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number; walkToStop?: number }): Trip {
   const { now, route, home, campus } = ctx;
   const ride = rideSeconds(route, campus, home) * 1000;
-  const walkToStop = ctx.walk(o.from, CAMPUS);
+  const walkToStop = o.walkToStop ?? ctx.walk(o.from, CAMPUS);
   const walkHome = ctx.prefs.walkMinutes;
   const walkAll = ctx.walk(o.from, HOME);
   const base = { id: o.id, kind: 'bus' as const, title: 'Bus home', walkMin: walkToStop, goal: 'Home', freeAt: o.readyAt };
@@ -459,6 +462,36 @@ export function planDay(input: PlanInput): DayPlan {
         next: usable ? { leaveBy: first.leaveAt, at: first.bus.at, home: first.arrive + input.prefs.walkMinutes * MIN, here: first.bus.here, source: first.bus.source } : null,
       };
     }
+  }
+
+  // One-off trips planned for today from the home screen. They get the same bus picking, the same
+  // "can't be done" warnings and the same alerts as a class day's rides.
+  const trips = (ov?.trips ?? []).filter((trip) => tempeDayKey(trip.at) === date);
+  for (const trip of trips) {
+    const id = `trip:${trip.id}`;
+    const clock = formatClock(trip.at);
+    const label = trip.kind === 'arrive' ? `You asked to be on campus by ${clock}.` : trip.kind === 'leave-home' ? `You asked to leave SoL at ${clock}.` : `You asked to leave campus at ${clock}.`;
+    const made =
+      trip.kind === 'leave-campus'
+        ? // Nothing says which building they're in, so a typical walk to the stop is allowed for.
+          homeward(ctx, { id, from: CAMPUS, readyAt: trip.at, walkToStop: CAMPUS_WALK_DEFAULT_MIN })
+        : outbound(ctx, {
+            id,
+            readyAt: trip.kind === 'leave-home' ? trip.at : 0,
+            deadline: trip.kind === 'arrive' ? trip.at : null,
+            goal: 'campus',
+            walkTo: CAMPUS,
+            walkBy: trip.kind === 'arrive' ? trip.at : null,
+            visit: true,
+          });
+    for (const leg of made.legs) legs.push({ ...leg, tripId: trip.id, tripLabel: label });
+    const window = { from: trip.at - alertsBefore, until: trip.at + alertsAfter };
+    plan.alertWindow = plan.alertWindow ? { from: Math.min(plan.alertWindow.from, window.from), until: Math.max(plan.alertWindow.until, window.until) } : window;
+  }
+  // With trips mixed in, the day reads in the order things happen.
+  if (trips.length > 0) {
+    const when = (leg: Leg) => leg.start ?? leg.notBefore ?? Infinity;
+    legs.sort((a, b) => when(a) - when(b));
   }
 
   // Classes stay on the timeline all day; a walk or ride that's over drops off.

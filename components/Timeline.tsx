@@ -141,10 +141,16 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
                 <span className="leg-node">{ICONS[leg.kind]}</span>
                 <div className="leg-body">
                   <p className="leg-title">{leg.title}</p>
+                  {leg.tripLabel && <p className="leg-detail">{leg.tripLabel}</p>}
                   <p className="leg-detail">{detail(leg, route)}</p>
                   {leg.note && (leg.kind !== 'bus' || leg.bus) && <p className="leg-detail">{leg.note}</p>}
                   {home && <p className="leg-detail">{home}</p>}
                   {leg.warn && <p className="leg-warn">{leg.warn}</p>}
+                  {leg.tripId && !leg.committed && (
+                    <button className="button small" onClick={() => onChange({ trips: (override?.trips ?? []).filter((trip) => trip.id !== leg.tripId) })}>
+                      Remove this trip
+                    </button>
+                  )}
                   {inProgress && !leftEarly && (
                     <button className="button small" onClick={() => classIsOut(leg.classId!)}>
                       {leg.visit ? 'Done here' : 'Class is out'}

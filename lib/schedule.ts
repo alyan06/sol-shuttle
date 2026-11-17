@@ -17,6 +17,11 @@ export function hasClasses(schedule: Schedule): boolean {
   return schedule.classes.length > 0;
 }
 
+/** Whether there is anything to plan on this date: classes at all, or a one-off trip made today. */
+export function hasPlan(schedule: Schedule, date: string): boolean {
+  return hasClasses(schedule) || (schedule.override?.date === date && (schedule.override.trips?.length ?? 0) > 0);
+}
+
 /** What's on for a given day, earliest first. */
 export function classesOn(schedule: Schedule, weekday: number, date: string): ClassBlock[] {
   return schedule.classes.filter((c) => c.days.includes(weekday) && (!c.until || date <= c.until)).sort((a, b) => a.startMin - b.startMin);
@@ -36,8 +41,8 @@ export function normalizeSchedule(saved: unknown): Schedule {
   const classes = (Array.isArray(raw.classes) ? raw.classes : fromPatterns).map((block) => ({ ...block, days: block.days ?? [] }));
   let override: DayOverride | null = null;
   if (raw.override && typeof raw.override.date === 'string') {
-    const { date, skipped, leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt } = raw.override;
-    const kept = { leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt };
+    const { date, skipped, leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt, trips } = raw.override;
+    const kept = { leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt, trips };
     override = { date, skipped: skipped ?? [], ...Object.fromEntries(Object.entries(kept).filter(([, value]) => value !== undefined)) };
   }
   return {
@@ -86,7 +91,7 @@ export function estimateWalk(from: Point, to: Point, paceMPerMin: number): numbe
 }
 
 /** Walk to the campus stop when no class says where you are. */
-const CAMPUS_WALK_DEFAULT_MIN = 10;
+export const CAMPUS_WALK_DEFAULT_MIN = 10;
 
 /** Minutes on foot to the stop being watched by hand: from the apartment for SoL, a typical campus walk for Gammage. */
 export function stopWalkMinutes(prefs: Pick<Prefs, 'walkMinutes'>, stopId: string | null): number {

@@ -1,7 +1,7 @@
 import { evaluate, isWatching } from './alerts.ts';
 import { liveBus } from './day.ts';
 import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planDay, walkAlerts, withinAlertWindow, type DayPlan } from './plan.ts';
-import { CAMPUS, HOME, hasClasses, stopWalkMinutes } from './schedule.ts';
+import { CAMPUS, HOME, hasPlan, stopWalkMinutes } from './schedule.ts';
 import type { Tracking, User } from './store.ts';
 import { tempeDayKey } from './time.ts';
 import type { AlertEvent, AlertState, Prefs, Route, Snapshot, Timetable, UserState } from './types.ts';
@@ -35,7 +35,7 @@ export function userTick({ now, snapshot, route, tracking, timetable, user }: Us
   const planFired = state.planFired.filter((key) => key.startsWith(date));
   let followStop: string | null = null;
   let plan: DayPlan | null = null;
-  if (hasClasses(schedule)) {
+  if (hasPlan(schedule, date)) {
     plan = planDay({ now, schedule, route, prefs: settings.prefs, live: liveBus(snapshot, tracking), timetable, progress });
     const step = advanceProgress(progress, plan, now);
     progress = step.progress;

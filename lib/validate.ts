@@ -1,6 +1,7 @@
 import { CAMPUS, HOME } from './schedule.ts';
 import type { PushSubscriptionJson } from './store.ts';
-import type { AlertPrefs, ClassBlock, DailyWatch, DayOverride, Place, Prefs, Schedule } from './types.ts';
+import { tempeDayKey } from './time.ts';
+import type { AlertPrefs, ClassBlock, DailyWatch, DayOverride, Place, Prefs, QuickTrip, Schedule } from './types.ts';
 
 /**
  * Everything a browser sends is checked here before it's stored. Anyone with an account can post
@@ -12,6 +13,9 @@ const MAX_BLOCKS = 40;
 const MAX_PLACES = 40;
 const MAX_TEXT = 60;
 const MAX_DEVICES = 5;
+const MAX_TRIPS = 4;
+const TRIP_KINDS = ['arrive', 'leave-home', 'leave-campus'];
+const FIVE_MIN = 300_000;
 /** Generously around Tempe: a building anywhere else is a mistake or mischief. */
 const BOX = { south: 33.3, north: 33.52, west: -112.05, east: -111.8 };
 /** The push services browsers actually use. The server posts to these addresses, so nothing else is allowed. */
@@ -160,6 +164,25 @@ export function cleanOverride(current: DayOverride | null, change: unknown, date
     const place = id(change.leftPlaceId);
     if (place) next.leftPlaceId = place;
     else delete next.leftPlaceId;
+  }
+  if (Array.isArray(change.trips)) {
+    const had = new Map((today.trips ?? []).map((trip) => [trip.id, trip]));
+    const seen = new Set<string>();
+    next.trips = change.trips.flatMap((raw): QuickTrip[] => {
+      if (!isObject(raw)) return [];
+      const tripId = id(raw.id);
+      if (!tripId || seen.has(tripId)) return [];
+      seen.add(tripId);
+      // A trip already planned stays as it was, even once its time has come.
+      const kept = had.get(tripId);
+      if (kept) return [kept];
+      if (typeof raw.at !== 'number' || !TRIP_KINDS.includes(raw.kind as string)) return [];
+      const at = Math.round(raw.at / FIVE_MIN) * FIVE_MIN;
+      // A new one has to be later today: nobody can plan for a time that has gone, or for another day.
+      if (at <= now || tempeDayKey(at) !== date) return [];
+      return [{ id: tripId, kind: raw.kind as QuickTrip['kind'], at }];
+    }).slice(0, MAX_TRIPS);
+    if (next.trips.length === 0) delete next.trips;
   }
   if (isObject(change.outEarly)) {
     next.outEarly = Object.fromEntries(

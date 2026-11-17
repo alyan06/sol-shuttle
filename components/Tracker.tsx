@@ -8,11 +8,12 @@ import type { ShuttleResponse } from '@/app/api/shuttle/route';
 import { defaultPrefs, parkedUp } from '@/lib/alerts.ts';
 import { answerFor } from '@/lib/answer.ts';
 import { advanceProgress, planAnswer, planDay } from '@/lib/plan.ts';
-import { CAMPUS, HOME, hasClasses, stopWalkMinutes } from '@/lib/schedule.ts';
+import { CAMPUS, HOME, hasClasses, hasPlan, stopWalkMinutes } from '@/lib/schedule.ts';
 import { formatClock, formatSince, tempeDayKey } from '@/lib/time.ts';
-import type { Progress, Route, Schedule } from '@/lib/types.ts';
+import type { Progress, QuickTrip as Trip, Route, Schedule } from '@/lib/types.ts';
 import { post, useAccount } from './Account';
 import { TopBar } from './AppShell';
+import QuickTrip from './QuickTrip';
 import { JoinGate, SignInCard } from './SignIn';
 import Timeline, { type OverrideChange } from './Timeline';
 
@@ -132,7 +133,7 @@ export default function Tracker({ route }: { route: Route }) {
   }, []);
 
   const plan = useMemo(() => {
-    if (!data?.private || !schedule || !hasClasses(schedule)) return null;
+    if (!data?.private || !schedule || !hasPlan(schedule, tempeDayKey(data.now))) return null;
     const server = data.private.progress;
     const date = tempeDayKey(data.now);
     const boarded = { ...(localProgress?.date === date ? localProgress.boarded : {}), ...(server?.date === date ? server.boarded : {}) };
@@ -296,6 +297,17 @@ export default function Tracker({ route }: { route: Route }) {
           <p className="error" role="alert">
             {planError}
           </p>
+        )}
+
+        {joined && schedule && data && (
+          <QuickTrip
+            now={data.now}
+            count={schedule.override?.date === tempeDayKey(data.now) ? (schedule.override.trips?.length ?? 0) : 0}
+            onAdd={(trip: Trip) => {
+              const today = schedule.override?.date === tempeDayKey(data.now) ? (schedule.override.trips ?? []) : [];
+              changeToday({ trips: [...today, trip] });
+            }}
+          />
         )}
 
         {joined && schedule && !hasClasses(schedule) && (

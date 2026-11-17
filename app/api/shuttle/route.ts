@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { viewer } from '@/lib/auth.ts';
 import { parkedSince, timetableToday } from '@/lib/day.ts';
 import { fetchPings } from '@/lib/samsara.ts';
-import { hasClasses } from '@/lib/schedule.ts';
+import { hasPlan } from '@/lib/schedule.ts';
 import { buildSnapshot } from '@/lib/snapshot.ts';
 import { loadCached } from '@/lib/store.ts';
 import { route } from '@/lib/tick.ts';
+import { tempeDayKey } from '@/lib/time.ts';
 import type { Course, Ping, Progress, Schedule, Snapshot, Timetable } from '@/lib/types.ts';
 
 export const dynamic = 'force-dynamic';
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
   let day: PrivateDay | null = null;
   const user = await viewer(request);
   if (user?.joined) {
-    const timetable = hasClasses(user.schedule) ? await timetableToday(tracking, now) : null;
+    const timetable = hasPlan(user.schedule, tempeDayKey(now)) ? await timetableToday(tracking, now) : null;
     day = { schedule: user.schedule, timetable, progress: user.state.progress };
   }
 

@@ -520,3 +520,54 @@ describe('alerts only around time on campus', () => {
     assert.equal(withinAlertWindow(all, null, T(3), false).length, 5);
   });
 });
+
+describe('a one-off trip planned for today', () => {
+  // Friday: no classes. live(10) at 9:00 means buses reach SoL 9:10 and 9:45, Gammage 9:30 and 10:05.
+  // The later bus is a loop further off, so it carries 5 minutes of doubt instead of 2.
+  const trip = (kind: 'arrive' | 'leave-home' | 'leave-campus', at: number) => ({ day: 4, ov: { trips: [{ id: 't1', kind, at }] } });
+
+  it('picks the latest bus that still gets you to campus by the time asked', () => {
+    const p = plan(T(9, 0, 4), live(10), trip('arrive', T(10, 0, 4)));
+    assert.deepEqual(ids(p), ['trip:t1']);
+    const ride = leg(p, 'trip:t1');
+    assert.deepEqual([clock(ride.start), clock(ride.bus!.at), clock(ride.bus!.arrive), ride.warn], ['9:03 AM', '9:10 AM', '9:30 AM', undefined]);
+    assert.equal(ride.tripLabel, 'You asked to be on campus by 10:00 AM.');
+    // Alerts open around the trip even though there are no classes today.
+    assert.deepEqual([clock(p.alertWindow!.from), clock(p.alertWindow!.until)], ['8:00 AM', '11:00 AM']);
+  });
+
+  it('says so when no bus can get you there by then', () => {
+    const ride = leg(plan(T(9, 0, 4), live(10), trip('arrive', T(9, 20, 4))), 'trip:t1');
+    assert.equal(clock(ride.bus!.arrive), '9:30 AM');
+    assert.equal(ride.warn, 'Late for campus: there around 9:30 AM.');
+  });
+
+  it('takes the first bus after a time to leave SoL, with no promise about arriving', () => {
+    const ride = leg(plan(T(9, 0, 4), live(10), trip('leave-home', T(9, 30, 4))), 'trip:t1');
+    assert.deepEqual([clock(ride.start), clock(ride.bus!.at), ride.bus!.stopId, ride.warn], ['9:35 AM', '9:45 AM', 'sol', undefined]);
+  });
+
+  it('takes the first bus home after a time to leave campus, allowing a walk to the stop', () => {
+    const ride = leg(plan(T(9, 0, 4), live(10), trip('leave-campus', T(9, 40, 4))), 'trip:t1');
+    assert.deepEqual([clock(ride.start), clock(ride.bus!.at), ride.bus!.stopId, ride.walkMin], ['9:50 AM', '10:05 AM', 'gammage', 10]);
+  });
+
+  it('sits in the day in the order things happen, alongside classes', () => {
+    // Monday, classes 9:00 to 11:45, and a trip back to campus for 4:00 PM.
+    const p = plan(T(8), live(10), { ov: { trips: [{ id: 't1', kind: 'arrive', at: T(16) }] } });
+    assert.deepEqual(ids(p), ['out', 'walk-in', 'class:c1', 'class:c2', 'back', 'trip:t1']);
+    assert.equal(clock(p.alertWindow!.until), '5:00 PM');
+  });
+
+  it('is committed to and alerted like any other ride', () => {
+    const now = T(9, 3, 4) + 30_000;
+    const p = plan(now, live(6.5), trip('arrive', T(10, 0, 4)));
+    const step = advanceProgress(null, p, now);
+    assert.deepEqual(step.committed.map((l) => l.id), ['trip:t1']);
+    assert.equal(leaveAlert(step.committed[0], route).title, 'Leave home now for campus');
+  });
+
+  it('ignores a trip that belongs to another day', () => {
+    assert.deepEqual(ids(plan(T(9, 0, 4), live(10), trip('arrive', T(10, 0, 3)))), []);
+  });
+});

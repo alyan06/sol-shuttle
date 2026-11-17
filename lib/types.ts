@@ -163,6 +163,13 @@ export type ClassBlock = {
   kind?: 'class' | 'visit';
 };
 
+/**
+ * A trip planned for today only, from the home screen. "arrive" is a promise to be at the campus
+ * stop by a time; the two "leave" kinds only say when someone can set off, with no promise about
+ * when they get there.
+ */
+export type QuickTrip = { id: string; kind: 'arrive' | 'leave-home' | 'leave-campus'; at: number };
+
 /** Today's one-off choices. Ignored once the date changes. */
 export type DayOverride = {
   date: string;
@@ -177,6 +184,8 @@ export type DayOverride = {
   /** "I'm on the bus" and "I'm home": either one ends the bus-home alerts for the day. */
   onBusAt?: number;
   homeAt?: number;
+  /** One-off trips planned for today. */
+  trips?: QuickTrip[];
 };
 
 export type Schedule = {

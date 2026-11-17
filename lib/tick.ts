@@ -4,7 +4,7 @@ import { appendDay, recordObservation } from './history.ts';
 import { pushConfigured, sendPush } from './push.ts';
 import routeData from './route.json';
 import { fetchPings } from './samsara.ts';
-import { hasClasses } from './schedule.ts';
+import { hasPlan } from './schedule.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { listUsers, load, loadUser, save, saveUserPart } from './store.ts';
 import { tempeDayKey } from './time.ts';
@@ -33,7 +33,7 @@ export async function runTick(now = Date.now()): Promise<{ status: string; peopl
   await save('tracking', { ...tracking, ...bus, leaveFired: false, wasAtStop: false, lastPing: snapshot.ping ?? tracking.lastPing, today });
 
   const people = everyone.filter((user) => user.joined);
-  const timetable = people.some((user) => hasClasses(user.schedule)) ? await timetableToday(tracking, now) : null;
+  const timetable = people.some((user) => hasPlan(user.schedule, date)) ? await timetableToday(tracking, now) : null;
   const canPush = pushConfigured();
   // Only the kinds are reported back: the caller keeps its replies for a while, and alert text names people's classes.
   const sent: string[] = [];

@@ -104,3 +104,32 @@ describe('push subscriptions', () => {
     assert.deepEqual(list.map((s) => s.endpoint.at(-1)), ['2', '3', '4', '5', '6']);
   });
 });
+
+describe('one-off trips', () => {
+  // NOW is 10:00 AM in Tempe on 2026-11-09.
+  const HOUR = 3_600_000;
+  const trip = (id: string, at: number, kind = 'arrive') => ({ id, kind, at });
+
+  it('accepts a trip later today, on a five-minute mark', () => {
+    const next = cleanOverride(null, { trips: [trip('a', NOW + HOUR + 70_000)] }, '2026-11-09', NOW)!;
+    assert.deepEqual(next.trips, [{ id: 'a', kind: 'arrive', at: NOW + HOUR }]);
+  });
+
+  it('refuses a time that has passed, another day, or a kind it does not know', () => {
+    const next = cleanOverride(null, { trips: [trip('past', NOW - 60_000), trip('tomorrow', NOW + 20 * HOUR), trip('odd', NOW + HOUR, 'teleport'), 'junk'] }, '2026-11-09', NOW)!;
+    assert.equal(next.trips, undefined);
+  });
+
+  it('keeps a trip already planned once its time has come, and allows it to be removed', () => {
+    const planned = cleanOverride(null, { trips: [trip('a', NOW + HOUR)] }, '2026-11-09', NOW)!;
+    const later = NOW + 2 * HOUR;
+    const more = cleanOverride(planned, { trips: [trip('a', NOW + HOUR), trip('b', later + HOUR, 'leave-campus')] }, '2026-11-09', later)!;
+    assert.deepEqual(more.trips!.map((item) => item.id), ['a', 'b']);
+    assert.equal(cleanOverride(more, { trips: [] }, '2026-11-09', later)!.trips, undefined);
+  });
+
+  it('caps a day at four', () => {
+    const many = Array.from({ length: 9 }, (_, i) => trip(`t${i}`, NOW + (i + 1) * 600_000));
+    assert.equal(cleanOverride(null, { trips: many }, '2026-11-09', NOW)!.trips!.length, 4);
+  });
+});

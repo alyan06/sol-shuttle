@@ -1210,6 +1210,25 @@ a {
   text-decoration-color: var(--line);
 }
 
+/* A one-off trip for today: what kind, a time from a short list, go. */
+.quick .segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.quick .segmented button {
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 0.875rem;
+}
+
+.quick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
 /* ---------- Classes ---------- */
 
 .blocks {
