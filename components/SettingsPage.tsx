@@ -199,7 +199,7 @@ export default function SettingsPage() {
             </div>
           </section>
           <p className="note fine">
-            <Link href="/privacy">Privacy and how this works</Link>
+            <Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link>
           </p>
         </div>
       </main>
@@ -383,7 +383,7 @@ export default function SettingsPage() {
         </section>
 
         <p className="note fine">
-          <Link href="/privacy">Privacy and how this works</Link>. Not run by SoL, ASU or Samsara. Times are estimates.
+          <Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link>. Not run by SoL, ASU or Samsara. Times are estimates.
         </p>
       </div>
     </main>

@@ -52,7 +52,7 @@ select cron.schedule(
   '30 seconds',
   $$
   select net.http_post(
-    url := 'https://alyan-sol-shuttle.vercel.app/api/tick',
+    url := 'https://solshuttle.app/api/tick',
     headers := jsonb_build_object(
       'Authorization', 'Bearer ' || (select value ->> 'bearer' from public.shuttle_kv where key = 'tick-auth'),
       'Content-Type', 'application/json'

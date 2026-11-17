@@ -224,26 +224,9 @@ a {
 }
 
 .mark {
-  width: 28px;
-  height: 28px;
-}
-
-.mark-body {
-  fill: var(--bus-blue);
-}
-
-.mark-stripe {
-  fill: var(--bus-orange);
-}
-
-.mark-glass {
-  fill: var(--bus-glass);
-}
-
-.mark-wheel {
-  fill: var(--ink);
-  stroke: var(--bg);
-  stroke-width: 1.4;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
 }
 
 .freshness {

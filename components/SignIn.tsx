@@ -82,7 +82,7 @@ export function SignInCard({ title = 'Make it yours' }: { title?: string }) {
         </p>
       )}
       <p className="note">
-        Signing in shares your name and email with this app and nothing else. <Link href="/privacy">How your data is used</Link>
+        Signing in shares your name and email with this app and nothing else. <Link href="/privacy">How your data is used</Link> · <Link href="/terms">Terms</Link>
       </p>
     </section>
   );

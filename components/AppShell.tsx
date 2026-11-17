@@ -40,18 +40,10 @@ const TABS = [
   },
 ];
 
-/** The bus, small: the app's mark. */
+/** The logo, small. Drawn by scripts/make-icons.mjs, so the app, its icon and its sign-in screen all show the same thing. */
 export function Mark() {
-  return (
-    <svg className="mark" viewBox="0 0 28 28" aria-hidden>
-      <rect className="mark-body" x="3" y="6" width="22" height="15" rx="4.5" />
-      <rect className="mark-stripe" x="3" y="14.5" width="22" height="3" />
-      <rect className="mark-glass" x="6" y="9" width="5.5" height="4" rx="1" />
-      <rect className="mark-glass" x="13" y="9" width="9" height="4" rx="1" />
-      <circle className="mark-wheel" cx="9" cy="21.5" r="2.4" />
-      <circle className="mark-wheel" cx="19" cy="21.5" r="2.4" />
-    </svg>
-  );
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img className="mark" src="/logo-120.png" alt="" width={30} height={30} />;
 }
 
 export function TopBar({ title = 'SoL Shuttle', children }: { title?: string; children?: ReactNode }) {
