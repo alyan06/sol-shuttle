@@ -17,6 +17,7 @@
     "dev:replay": "node scripts/dev-local.mjs --replay"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "maplibre-gl": "^6.16.0",
     "next": "^16.4.5",
     "react": "^19.3.1",
