@@ -2,11 +2,9 @@ import { NextResponse } from 'next/server';
 import { viewer } from '@/lib/auth.ts';
 import { parkedSince, timetableToday } from '@/lib/day.ts';
 import { fetchPings } from '@/lib/samsara.ts';
-import { hasPlan } from '@/lib/schedule.ts';
 import { buildSnapshot } from '@/lib/snapshot.ts';
 import { loadCached } from '@/lib/store.ts';
 import { route } from '@/lib/tick.ts';
-import { tempeDayKey } from '@/lib/time.ts';
 import type { Course, Ping, Progress, Schedule, Snapshot, Timetable } from '@/lib/types.ts';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +16,7 @@ let prevS: number | null = null;
 let course: Course | null = null;
 
 /** The signed-in person's day. The bus position itself is public. */
-export type PrivateDay = { schedule: Schedule; timetable: Timetable | null; progress: Progress | null };
+export type PrivateDay = { schedule: Schedule; timetable: Timetable; progress: Progress | null };
 
 export type ShuttleResponse = Snapshot & {
   lastSeen: Ping | null;
@@ -56,8 +54,8 @@ export async function GET(request: Request) {
   let day: PrivateDay | null = null;
   const user = await viewer(request);
   if (user?.joined) {
-    const timetable = hasPlan(user.schedule, tempeDayKey(now)) ? await timetableToday(tracking, now) : null;
-    day = { schedule: user.schedule, timetable, progress: user.state.progress };
+    // Always sent: even with nothing planned, the home screen says when the bus runs today.
+    day = { schedule: user.schedule, timetable: await timetableToday(tracking, now), progress: user.state.progress };
   }
 
   const body: ShuttleResponse = {

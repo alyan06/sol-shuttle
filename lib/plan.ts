@@ -1,4 +1,5 @@
 import { CAMPUS, CAMPUS_WALK_DEFAULT_MIN, HOME, allPlaces, classesOn, walkMinutes } from './schedule.ts';
+import { tripWindow } from './service.ts';
 import { formatClock, tempeDayKey, tempeMidnight, tempeWeekday } from './time.ts';
 import type {
   ClassBlock,
@@ -366,7 +367,7 @@ export function planDay(input: PlanInput): DayPlan {
       if (entry.since > (ov?.replanAt ?? 0)) ctx.boarded[id] = entry;
     }
   }
-  if (timetable?.runs === false) plan.service = `No bus on ${DAY_NAMES[weekday]}s, going by the last ${timetable.daysSeen}.`;
+  if (timetable?.runs === false) plan.service = `No bus on ${DAY_NAMES[weekday]}s${timetable.daysSeen >= 2 ? `, going by the last ${timetable.daysSeen}` : ''}.`;
   else if (ctx.lastMs !== null) plan.service = `Last bus parks around ${formatClock(ctx.lastMs)}${timetable?.lastSure ? '' : ' (seen once)'}.`;
 
   // The last thing on campus is whatever ends last, which needn't be what starts last.
@@ -469,8 +470,9 @@ export function planDay(input: PlanInput): DayPlan {
   const trips = (ov?.trips ?? []).filter((trip) => tempeDayKey(trip.at) === date);
   for (const trip of trips) {
     const id = `trip:${trip.id}`;
-    const clock = formatClock(trip.at);
-    const label = trip.kind === 'arrive' ? `You asked to be on campus by ${clock}.` : trip.kind === 'leave-home' ? `You asked to leave SoL at ${clock}.` : `You asked to leave campus at ${clock}.`;
+    // A trip is planned for a quarter-hour window, not a minute: the bus can't promise one.
+    const window = tripWindow(trip);
+    const label = trip.kind === 'arrive' ? `You asked to get to campus between ${window}.` : trip.kind === 'leave-home' ? `You asked to leave SoL between ${window}.` : `You asked to leave campus between ${window}.`;
     const made =
       trip.kind === 'leave-campus'
         ? // Nothing says which building they're in, so a typical walk to the stop is allowed for.
@@ -485,8 +487,8 @@ export function planDay(input: PlanInput): DayPlan {
             visit: true,
           });
     for (const leg of made.legs) legs.push({ ...leg, tripId: trip.id, tripLabel: label });
-    const window = { from: trip.at - alertsBefore, until: trip.at + alertsAfter };
-    plan.alertWindow = plan.alertWindow ? { from: Math.min(plan.alertWindow.from, window.from), until: Math.max(plan.alertWindow.until, window.until) } : window;
+    const hours = { from: trip.at - alertsBefore, until: trip.at + alertsAfter };
+    plan.alertWindow = plan.alertWindow ? { from: Math.min(plan.alertWindow.from, hours.from), until: Math.max(plan.alertWindow.until, hours.until) } : hours;
   }
   // With trips mixed in, the day reads in the order things happen.
   if (trips.length > 0) {

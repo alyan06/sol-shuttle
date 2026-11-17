@@ -531,7 +531,7 @@ describe('a one-off trip planned for today', () => {
     assert.deepEqual(ids(p), ['trip:t1']);
     const ride = leg(p, 'trip:t1');
     assert.deepEqual([clock(ride.start), clock(ride.bus!.at), clock(ride.bus!.arrive), ride.warn], ['9:03 AM', '9:10 AM', '9:30 AM', undefined]);
-    assert.equal(ride.tripLabel, 'You asked to be on campus by 10:00 AM.');
+    assert.equal(ride.tripLabel, 'You asked to get to campus between 9:45 to 10:00 AM.');
     // Alerts open around the trip even though there are no classes today.
     assert.deepEqual([clock(p.alertWindow!.from), clock(p.alertWindow!.until)], ['8:00 AM', '11:00 AM']);
   });

@@ -9,6 +9,7 @@ import { defaultPrefs, parkedUp } from '@/lib/alerts.ts';
 import { answerFor } from '@/lib/answer.ts';
 import { advanceProgress, planAnswer, planDay } from '@/lib/plan.ts';
 import { CAMPUS, HOME, hasClasses, hasPlan, stopWalkMinutes } from '@/lib/schedule.ts';
+import { serviceState } from '@/lib/service.ts';
 import { formatClock, formatSince, tempeDayKey } from '@/lib/time.ts';
 import type { Progress, QuickTrip as Trip, Route, Schedule } from '@/lib/types.ts';
 import { post, useAccount } from './Account';
@@ -161,6 +162,10 @@ export default function Tracker({ route }: { route: Route }) {
   const answer = useMemo(() => {
     if (!data) return null;
     if (planned) return planned;
+    // Outside the bus's days and hours, say so instead of "no signal", unless the bus is plainly out driving.
+    const service = serviceState(data.now, data.private?.timetable ?? null);
+    const driving = data.status === 'live' && (data.ping?.mph ?? 0) >= 4;
+    if (!service.open && !driving) return { tone: 'unknown' as const, lead: 'Right now', headline: service.headline, detail: service.detail };
     return answerFor({
       route,
       // SoL is the walk from the apartment; Gammage is a typical walk across campus.
@@ -302,6 +307,7 @@ export default function Tracker({ route }: { route: Route }) {
         {joined && schedule && data && (
           <QuickTrip
             now={data.now}
+            timetable={data.private?.timetable ?? null}
             count={schedule.override?.date === tempeDayKey(data.now) ? (schedule.override.trips?.length ?? 0) : 0}
             onAdd={(trip: Trip) => {
               const today = schedule.override?.date === tempeDayKey(data.now) ? (schedule.override.trips ?? []) : [];

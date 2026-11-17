@@ -1,5 +1,6 @@
 import { parkedUp } from './alerts.ts';
 import type { LiveBus } from './plan.ts';
+import { SERVICE_DAYS } from './service.ts';
 import { loadCached, type Tracking } from './store.ts';
 import { buildTimetable } from './timetable.ts';
 import { tempeWeekday } from './time.ts';
@@ -20,7 +21,9 @@ export async function timetableToday(tracking: Tracking, now: number): Promise<T
     const others = [1, 2, 3, 4, 5].flatMap((day) => tracking.serviceEnds[day] ?? []);
     if (others.length > 0) ends = [Math.min(...others)];
   }
-  return buildTimetable(history.days, weekday, ends);
+  const timetable = buildTimetable(history.days, weekday, ends);
+  // The bus doesn't run at weekends. Until the log has seen enough of a day to say for itself, that stands.
+  return timetable.runs === null && !SERVICE_DAYS.includes(weekday) ? { ...timetable, runs: false } : timetable;
 }
 
 type Notes = Pick<Tracking, 'lastMovedAt' | 'lastSeenAt'>;

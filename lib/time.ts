@@ -51,6 +51,13 @@ export function formatMinute(minute: number): string {
   return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
+/** A span of time, like "3:00 to 3:15 PM". The AM or PM is said once when both ends share it. */
+export function formatRange(start: number, end: number): string {
+  const from = formatClock(start);
+  const to = formatClock(end);
+  return `${from.slice(-2) === to.slice(-2) ? from.slice(0, -3) : from} to ${to}`;
+}
+
 export function formatClock(ms: number): string {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Phoenix',
