@@ -1,18 +1,12 @@
-import type { Place, Prefs, Route, Schedule } from './types.ts';
+import type { ClassBlock, DayOverride, Place, Prefs, Route, Schedule } from './types.ts';
 
-/** Fixed places. Home and campus are the two bus stops; the gym is Sun Devil Fitness Complex. */
+/** The two bus stops. Home is the apartment's; campus is where everyone gets off. */
 export const HOME = 'sol';
 export const CAMPUS = 'gammage';
-export const GYM = 'gym';
-const GYM_PLACE: Place = { id: GYM, name: 'Gym', lat: 33.41541, lng: -111.93195 };
 
 export const defaultSchedule: Schedule = {
   places: [],
-  patterns: [
-    { id: 'mw', name: 'Monday and Wednesday', days: [1, 3], classes: [] },
-    { id: 'tth', name: 'Tuesday and Thursday', days: [2, 4], classes: [] },
-  ],
-  gym: { days: [1, 2, 3, 5, 6], workoutMin: 75, afterClass: 'gym', evening: 'walk', eveningLeaveMin: 17 * 60 },
+  classes: [],
   arriveEarlyMin: 5,
   paceMPerMin: 80,
   walkOverrides: {},
@@ -20,13 +14,46 @@ export const defaultSchedule: Schedule = {
 };
 
 export function hasClasses(schedule: Schedule): boolean {
-  return schedule.patterns.some((p) => p.classes.length > 0);
+  return schedule.classes.length > 0;
 }
 
-/** Every place the planner can walk between: the stops, the gym, then the class buildings. */
+/** What's on for a given day, earliest first. */
+export function classesOn(schedule: Schedule, weekday: number, date: string): ClassBlock[] {
+  return schedule.classes.filter((c) => c.days.includes(weekday) && (!c.until || date <= c.until)).sort((a, b) => a.startMin - b.startMin);
+}
+
+type OldPattern = { days?: number[]; until?: string; classes?: Omit<ClassBlock, 'days'>[] };
+
+/**
+ * A saved schedule in today's shape. Older saves grouped classes under day patterns and carried a
+ * gym plan; both are folded away here, so nothing stored has to be rewritten by hand.
+ */
+export function normalizeSchedule(saved: unknown): Schedule {
+  const raw = (saved ?? {}) as Partial<Schedule> & { patterns?: OldPattern[] };
+  const fromPatterns = (raw.patterns ?? []).flatMap((pattern) =>
+    (pattern.classes ?? []).map((block) => ({ ...block, days: pattern.days ?? [], ...(pattern.until ? { until: pattern.until } : {}) })),
+  );
+  const classes = (Array.isArray(raw.classes) ? raw.classes : fromPatterns).map((block) => ({ ...block, days: block.days ?? [] }));
+  let override: DayOverride | null = null;
+  if (raw.override && typeof raw.override.date === 'string') {
+    const { date, skipped, leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt } = raw.override;
+    const kept = { leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt };
+    override = { date, skipped: skipped ?? [], ...Object.fromEntries(Object.entries(kept).filter(([, value]) => value !== undefined)) };
+  }
+  return {
+    places: Array.isArray(raw.places) ? raw.places : [],
+    classes,
+    arriveEarlyMin: raw.arriveEarlyMin ?? defaultSchedule.arriveEarlyMin,
+    paceMPerMin: raw.paceMPerMin ?? defaultSchedule.paceMPerMin,
+    walkOverrides: raw.walkOverrides ?? {},
+    override,
+  };
+}
+
+/** Every place the planner can walk between: the stops, then the buildings in the schedule. */
 export function allPlaces(schedule: Schedule, route: Route): Place[] {
   const stops = route.stops.map(({ id, name, lat, lng }) => ({ id, name, lat, lng }));
-  return [...stops, GYM_PLACE, ...schedule.places];
+  return [...stops, ...schedule.places];
 }
 
 export function walkKey(a: string, b: string): string {
@@ -50,7 +77,7 @@ export function walkMinutes(schedule: Schedule, places: Place[], fromId: string,
 
 type Point = { lat: number; lng: number };
 
-/** The same estimate between any two points, such as the phone's position and a stop. */
+/** The same estimate between any two points. */
 export function estimateWalk(from: Point, to: Point, paceMPerMin: number): number {
   const northSouth = Math.abs(from.lat - to.lat) * 111_320;
   const eastWest = Math.abs(from.lng - to.lng) * 111_320 * Math.cos((from.lat * Math.PI) / 180);

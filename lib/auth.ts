@@ -1,9 +1,121 @@
-/** Single-user lock. With no APP_PASSCODE set (local development) everything is open. */
-export function passcodeRequired(): boolean {
-  return Boolean(process.env.APP_PASSCODE);
+import { randomToken, sameSecret, seal, unseal } from './session.ts';
+import { ensureUser, loadUser, type User } from './store.ts';
+
+/**
+ * Who is asking. People sign in with Google; the app then keeps its own signed cookie and never
+ * sees a password. On a development machine with nothing configured, everyone is one local person.
+ */
+
+export const SESSION_COOKIE = 'shuttle_session';
+export const OAUTH_COOKIE = 'shuttle_signin';
+/** The first account, from when the app had one user and a passcode. */
+export const OWNER_ID = 'owner';
+const LOCAL_ID = 'local';
+const SESSION_DAYS = 180;
+
+export type SignInWays = { google: boolean; passcode: boolean };
+
+export function googleConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 }
 
-export function allowed(request: Request): boolean {
-  const passcode = process.env.APP_PASSCODE;
-  return !passcode || request.headers.get('x-passcode') === passcode;
+/** Hosted, a missing secret means no session can be made or read. Only a development machine gets a stand-in. */
+function sessionSecret(): string {
+  return process.env.SESSION_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'development-only');
+}
+
+/** Nothing to sign in with and nothing to protect: a development machine. */
+export function openMode(): boolean {
+  return !process.env.APP_PASSCODE && !googleConfigured() && process.env.NODE_ENV !== 'production';
+}
+
+/** Google is the way in. The old passcode stays only until Google is set up, so the owner is never locked out. */
+export function signInWays(): SignInWays {
+  return { google: googleConfigured(), passcode: Boolean(process.env.APP_PASSCODE) && !googleConfigured() };
+}
+
+export function joinCodeRequired(): boolean {
+  return Boolean(process.env.JOIN_CODE);
+}
+
+export function passcodeMatches(given: unknown): boolean {
+  const expected = process.env.APP_PASSCODE;
+  return typeof given === 'string' && Boolean(expected) && sameSecret(given, expected!);
+}
+
+export function joinCodeMatches(given: unknown): boolean {
+  const expected = process.env.JOIN_CODE;
+  return typeof given === 'string' && Boolean(expected) && sameSecret(given.trim().toLowerCase(), expected!.trim().toLowerCase());
+}
+
+function cookie(request: Request, name: string): string | null {
+  const header = request.headers.get('cookie') ?? '';
+  for (const part of header.split(';')) {
+    const [key, ...rest] = part.trim().split('=');
+    if (key === name) return rest.join('=');
+  }
+  return null;
+}
+
+/** The public address of the app: what Google sends people back to. */
+export function appOrigin(request: Request): string {
+  return (process.env.APP_URL ?? new URL(request.url).origin).replace(/\/$/, '');
+}
+
+function cookieFlags(request: Request, maxAgeSeconds: number): string {
+  const secure = appOrigin(request).startsWith('https://') ? '; Secure' : '';
+  return `Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
+export function sessionCookie(request: Request, userId: string, now = Date.now()): string {
+  const token = seal({ uid: userId }, sessionSecret(), now + SESSION_DAYS * 86_400_000);
+  return `${SESSION_COOKIE}=${token}; ${cookieFlags(request, SESSION_DAYS * 86_400)}`;
+}
+
+export function clearCookie(request: Request, name: string): string {
+  return `${name}=; ${cookieFlags(request, 0)}`;
+}
+
+/** Remembers, for ten minutes, which sign-in this browser started, so a reply from Google can't be replayed or injected. */
+export function startOauth(request: Request, now = Date.now()): { state: string; nonce: string; cookie: string } {
+  const state = randomToken();
+  const nonce = randomToken();
+  const token = seal({ state, nonce }, sessionSecret(), now + 600_000);
+  return { state, nonce, cookie: `${OAUTH_COOKIE}=${token}; ${cookieFlags(request, 600)}` };
+}
+
+export function finishOauth(request: Request, now = Date.now()): { state: string; nonce: string } | null {
+  return unseal<{ state: string; nonce: string }>(cookie(request, OAUTH_COOKIE), sessionSecret(), now);
+}
+
+/** The signed-in account's id, or null. Reads only the cookie. */
+export function viewerId(request: Request, now = Date.now()): string | null {
+  if (openMode()) return LOCAL_ID;
+  return unseal<{ uid: string }>(cookie(request, SESSION_COOKIE), sessionSecret(), now)?.uid ?? null;
+}
+
+/** The signed-in person, or null: not signed in, or the account has since been deleted. */
+export async function viewer(request: Request): Promise<User | null> {
+  const id = viewerId(request);
+  if (!id) return null;
+  if (id === LOCAL_ID) return ensureUser({ id: LOCAL_ID, name: 'You' });
+  return loadUser(id);
+}
+
+/** A change must come from the app's own pages, not from a form on some other site. */
+export function sameOrigin(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (!origin) return true;
+  return origin === new URL(request.url).origin || origin === appOrigin(request);
+}
+
+/** Slows down guessing at the passcode or the residents' code: five tries a minute per address, per server. */
+const tries = new Map<string, number[]>();
+export function tooManyTries(request: Request, now = Date.now()): boolean {
+  const who = request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
+  const recent = (tries.get(who) ?? []).filter((at) => now - at < 60_000);
+  recent.push(now);
+  tries.set(who, recent);
+  if (tries.size > 5000) tries.clear();
+  return recent.length > 5;
 }

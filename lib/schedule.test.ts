@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { estimateWalk, stopWalkMinutes } from './schedule.ts';
+import { classesOn, estimateWalk, normalizeSchedule, stopWalkMinutes } from './schedule.ts';
 
 const GAMMAGE = { lat: 33.41715, lng: -111.93655 };
 
@@ -19,5 +19,48 @@ describe('stopWalkMinutes', () => {
     assert.equal(stopWalkMinutes({ walkMinutes: 5 }, 'sol'), 5);
     assert.equal(stopWalkMinutes({ walkMinutes: 5 }, null), 5);
     assert.equal(stopWalkMinutes({ walkMinutes: 5 }, 'gammage'), 10);
+  });
+});
+
+describe('normalizeSchedule', () => {
+  it('turns the old day patterns into classes with their own days, and drops the gym', () => {
+    const old = {
+      places: [{ id: 'p1', name: 'Coor Hall', lat: 33.4195, lng: -111.9369 }],
+      patterns: [
+        { id: 'mw', name: 'Monday and Wednesday', days: [1, 3], until: '2026-12-02', classes: [{ id: 'c1', course: 'CSE 205', placeId: 'p1', startMin: 540, endMin: 615 }] },
+        { id: 'tth', name: 'Tuesday and Thursday', days: [2, 4], classes: [] },
+      ],
+      gym: { days: [1, 2], workoutMin: 75, afterClass: 'gym', evening: 'walk', eveningLeaveMin: 1020 },
+      arriveEarlyMin: 8,
+      paceMPerMin: 92,
+      walkOverrides: { 'gammage|p1': 7 },
+      override: { date: '2026-11-16', skipped: ['c1'], afterClass: 'home', gymDoneAt: 5, onBusAt: 9 },
+    };
+    const now = normalizeSchedule(old);
+    assert.deepEqual(now.classes, [{ id: 'c1', course: 'CSE 205', placeId: 'p1', startMin: 540, endMin: 615, days: [1, 3], until: '2026-12-02' }]);
+    assert.deepEqual(now.override, { date: '2026-11-16', skipped: ['c1'], onBusAt: 9 });
+    assert.deepEqual([now.arriveEarlyMin, now.paceMPerMin, now.walkOverrides], [8, 92, { 'gammage|p1': 7 }]);
+    assert.equal('gym' in now, false);
+    assert.equal('patterns' in now, false);
+  });
+
+  it('leaves a current schedule alone and fills in a missing one', () => {
+    const current = normalizeSchedule({ places: [], classes: [{ id: 'c', course: 'X', placeId: 'p', startMin: 1, endMin: 2, days: [5] }], arriveEarlyMin: 5, paceMPerMin: 80, walkOverrides: {}, override: null });
+    assert.equal(current.classes[0].days[0], 5);
+    assert.deepEqual(normalizeSchedule(null), { places: [], classes: [], arriveEarlyMin: 5, paceMPerMin: 80, walkOverrides: {}, override: null });
+  });
+});
+
+describe('classesOn', () => {
+  it('gives the day\'s blocks in order, up to their last day', () => {
+    const schedule = normalizeSchedule({
+      classes: [
+        { id: 'late', course: 'B', placeId: 'p', startMin: 900, endMin: 960, days: [1] },
+        { id: 'early', course: 'A', placeId: 'p', startMin: 540, endMin: 600, days: [1, 3], until: '2026-11-16' },
+      ],
+    });
+    assert.deepEqual(classesOn(schedule, 1, '2026-11-16').map((c) => c.id), ['early', 'late']);
+    assert.deepEqual(classesOn(schedule, 1, '2026-11-23').map((c) => c.id), ['late']);
+    assert.deepEqual(classesOn(schedule, 2, '2026-11-17'), []);
   });
 });

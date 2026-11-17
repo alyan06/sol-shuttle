@@ -77,6 +77,9 @@ export type Prefs = {
   alerts: AlertPrefs;
   /** Recurring watch window in Tempe local time, minutes after midnight. */
   dailyWatch: DailyWatch | null;
+  /** Alerts run from this many minutes before the first thing on campus to this many after the last. Missing means 120 and 60. */
+  alertsBeforeMin?: number;
+  alertsAfterMin?: number;
 };
 
 export type AlertState = {
@@ -139,44 +142,34 @@ export type Timetable = {
   arrivals: Record<string, TimetableSlot[]>;
 };
 
-export type Place = { id: string; name: string; lat: number; lng: number };
+/** A building on campus. `code` is ASU's own short name for it, as printed on a class schedule. */
+export type Place = { id: string; name: string; lat: number; lng: number; code?: string };
 
-/** A class meeting. Times are minutes after midnight in Tempe. */
-export type ClassBlock = { id: string; course: string; placeId: string; room?: string; startMin: number; endMin: number };
-
-export type Pattern = {
+/**
+ * Time on campus: a class, or any other stretch someone wants to be there for ("visit"). Times are
+ * minutes after midnight in Tempe. The bus there is planned for the start, the bus home from the end.
+ */
+export type ClassBlock = {
   id: string;
-  name: string;
+  course: string;
+  placeId: string;
+  room?: string;
+  startMin: number;
+  endMin: number;
+  /** Weekdays it happens on, 0 = Sunday. */
   days: number[];
-  classes: ClassBlock[];
-  /** Last day these classes meet, as YYYY-MM-DD in Tempe. After it the pattern is ignored. */
+  /** Last day it happens, as YYYY-MM-DD in Tempe. After it the block is ignored. */
   until?: string;
-};
-
-export type AfterClass = 'gym' | 'home';
-export type Evening = 'bus' | 'walk' | 'skip';
-
-export type GymPlan = {
-  days: number[];
-  workoutMin: number;
-  /** Usual choice after the last class on a gym day. */
-  afterClass: AfterClass;
-  /** Usual way to get to the gym after going home first, or on a day with no classes. */
-  evening: Evening;
-  eveningLeaveMin: number;
+  kind?: 'class' | 'visit';
 };
 
 /** Today's one-off choices. Ignored once the date changes. */
 export type DayOverride = {
   date: string;
   skipped: string[];
-  afterClass?: AfterClass;
-  evening?: Evening;
-  eveningLeaveMin?: number;
   /** Left campus early from this place at this time. */
   leftAt?: number;
   leftPlaceId?: string;
-  gymDoneAt?: number;
   /** "Plan again from now": buses committed to before this are forgotten. */
   replanAt?: number;
   /** Classes that let out early today, by class id, and when. */
@@ -188,8 +181,7 @@ export type DayOverride = {
 
 export type Schedule = {
   places: Place[];
-  patterns: Pattern[];
-  gym: GymPlan;
+  classes: ClassBlock[];
   /** Minutes to be in the room before class starts. */
   arriveEarlyMin: number;
   /** Walking pace in metres a minute. */
@@ -197,6 +189,17 @@ export type Schedule = {
   /** Walk minutes that replace the estimate, keyed by the two place ids sorted and joined with "|". */
   walkOverrides: Record<string, number>;
   override: DayOverride | null;
+};
+
+/** What the alert check remembers about one person between runs. */
+export type UserState = {
+  leaveFired: boolean;
+  wasAtStop: boolean;
+  /** The stop the leave and arrival alerts are currently about. */
+  alertStopId: string | null;
+  progress: Progress | null;
+  /** Plan alerts already sent today, as "date:id". */
+  planFired: string[];
 };
 
 /** Bus legs taken as boarded once their bus has come, so the plan doesn't jump to the next bus. */

@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { busLine, type DayPlan, type Leg } from '@/lib/plan.ts';
-import { formatClock, inputToMinute, minuteToInput } from '@/lib/time.ts';
-import type { AfterClass, DayOverride, Evening, Route, Schedule } from '@/lib/types.ts';
+import { formatClock } from '@/lib/time.ts';
+import type { DayOverride, Route, Schedule } from '@/lib/types.ts';
 
 export type OverrideChange = Partial<Omit<DayOverride, 'date'>> | null;
 
@@ -16,30 +16,27 @@ type Props = {
 };
 
 const MIN = 60_000;
-const AFTER_CLASS: { value: AfterClass; label: string }[] = [
-  { value: 'gym', label: 'Gym' },
-  { value: 'home', label: 'Home' },
-];
-const EVENING: { value: Evening; label: string }[] = [
-  { value: 'bus', label: 'Bus' },
-  { value: 'walk', label: 'Walk' },
-  { value: 'skip', label: 'Skip' },
-];
 
-function Choice<T extends string>({ label, options, value, onPick }: { label: string; options: { value: T; label: string }[]; value: T; onPick: (value: T) => void }) {
-  return (
-    <div className="choice" role="group" aria-label={label}>
-      <span className="choice-label">{label}</span>
-      <div className="segmented">
-        {options.map((option) => (
-          <button key={option.value} aria-pressed={option.value === value} onClick={() => onPick(option.value)}>
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+const ICONS: Record<Leg['kind'], React.ReactNode> = {
+  bus: (
+    <svg viewBox="0 0 20 20" aria-hidden>
+      <rect x="3.5" y="3" width="13" height="11.5" rx="3" />
+      <path d="M3.5 9.5h13M6.5 17v-2.5M13.5 17v-2.5" />
+    </svg>
+  ),
+  walk: (
+    <svg viewBox="0 0 20 20" aria-hidden>
+      <circle cx="11" cy="3.8" r="1.6" />
+      <path d="M10.5 7.5 8 10.5l2.5 2.2.8 4.3M10.5 7.5l2.2 2.3 2.8.7M8.3 13.5 6 17" />
+    </svg>
+  ),
+  class: (
+    <svg viewBox="0 0 20 20" aria-hidden>
+      <path d="M2.5 8 10 4.5 17.5 8 10 11.5z" />
+      <path d="M5.5 9.8v3.4c1.2 1.1 2.7 1.7 4.5 1.7s3.3-.6 4.5-1.7V9.8" />
+    </svg>
+  ),
+};
 
 function detail(leg: Leg, route: Route): string {
   if (leg.kind === 'bus') {
@@ -48,7 +45,6 @@ function detail(leg: Leg, route: Route): string {
     return `${busLine(leg, route)}${stop}${leg.lastBus ? ' Last bus today.' : ''}${walk}`;
   }
   if (leg.kind === 'walk') return `${leg.walkMin} min, there by ${formatClock(leg.end!)}.`;
-  if (leg.kind === 'gym') return `Until about ${formatClock(leg.end!)}.`;
   const where = [leg.place, leg.room].filter(Boolean).join(', ');
   return leg.skipped ? 'Skipped today.' : `${where ? `${where}. ` : ''}Until ${formatClock(leg.end!)}.`;
 }
@@ -75,10 +71,10 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
   const leftEarly = override?.leftAt !== undefined || override?.onBusAt !== undefined || override?.homeAt !== undefined;
   const inClass = leftEarly ? undefined : taken.find((leg) => leg.start! <= now && now < leg.end!);
   const laterClasses = inClass ? taken.filter((leg) => leg.start! >= inClass.end!) : [];
-  const onCampusNow = !leftEarly && taken.length > 0 && now >= taken[0].start! - 20 * MIN && now < taken.at(-1)!.end!;
+  const onCampusNow = !leftEarly && taken.length > 0 && now >= taken[0].start! - 20 * MIN && now < Math.max(...taken.map((leg) => leg.end!));
   const committed = plan.legs.some((leg) => leg.committed);
   // Going home after the class you're in only needs saying when something else was planned after it.
-  const canHeadHome = inClass && (laterClasses.length > 0 || plan.afterClass === 'gym');
+  const canHeadHome = inClass && laterClasses.length > 0;
   const hasChoices = override !== null && (skipped.length > 0 || Object.keys(override).some((key) => key !== 'date' && key !== 'skipped'));
   const watch = plan.homeWatch;
 
@@ -88,13 +84,13 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
 
   function leaveCampus() {
     const last = taken.filter((leg) => leg.end! <= now).at(-1) ?? taken[0];
-    const block = schedule.patterns.flatMap((p) => p.classes).find((c) => c.id === last.classId);
+    const block = schedule.classes.find((c) => c.id === last.classId);
     const unfinished = classes.filter((leg) => leg.end! > now).map((leg) => leg.classId!);
-    onChange({ skipped: [...new Set([...skipped, ...unfinished])], leftAt: now, leftPlaceId: block?.placeId, afterClass: 'home' });
+    onChange({ skipped: [...new Set([...skipped, ...unfinished])], leftAt: now, leftPlaceId: block?.placeId });
   }
 
   function homeAfterThisClass() {
-    onChange({ skipped: [...new Set([...skipped, ...laterClasses.map((leg) => leg.classId!)])], afterClass: 'home' });
+    onChange({ skipped: [...new Set([...skipped, ...laterClasses.map((leg) => leg.classId!)])] });
   }
 
   function classIsOut(classId: string) {
@@ -102,30 +98,34 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
   }
 
   return (
-    <section className="section" aria-labelledby="today-title">
+    <section className="today-plan" aria-labelledby="today-title">
       <div className="section-head">
         <h2 id="today-title">Today</h2>
         <Link className="text-link" href="/schedule">
-          Edit schedule
+          Edit classes
         </Link>
       </div>
 
-      {plan.onCampus && plan.gymDay && !leftEarly && (
-        <Choice label="After class" options={AFTER_CLASS} value={plan.afterClass} onPick={(afterClass) => onChange({ afterClass })} />
-      )}
-      {plan.eveningApplies && (
-        <div className="choice-row">
-          <Choice label={plan.onCampus ? 'Gym later' : 'Gym'} options={EVENING} value={plan.evening} onPick={(evening) => onChange({ evening })} />
-          {plan.evening !== 'skip' && (
-            <label className="field inline">
-              <span>Leave home at</span>
-              <input
-                type="time"
-                value={minuteToInput(plan.eveningLeaveMin)}
-                onChange={(e) => e.target.value && onChange({ eveningLeaveMin: inputToMinute(e.target.value) })}
-              />
-            </label>
-          )}
+      {watch && (
+        <div className="ride-home">
+          <p className="ride-home-lead">{watch.course ? `After ${watch.course}` : 'From campus'}</p>
+          <h3>{watch.next ? (watch.next.here ? 'Bus home is at Gammage now' : `Bus home ${formatClock(watch.next.at)}`) : 'Watching for a bus home'}</h3>
+          <p>
+            {watch.next
+              ? `Leave ${watch.place} by ${formatClock(watch.next.leaveBy)}, ${watch.walkMin} min walk. Home about ${formatClock(watch.next.home)}.`
+              : watch.until
+                ? `Nothing you could leave ${watch.place} for before your next class.`
+                : `No bus time right now. You'll hear about each one, timed from ${watch.place}.`}
+            {watch.until === null && ' Alerts for each bus keep coming until you tap one of these.'}
+          </p>
+          <div className="button-row">
+            <button className="button" onClick={() => onChange({ onBusAt: now })}>
+              I&apos;m on the bus
+            </button>
+            <button className="button" onClick={() => onChange({ homeAt: now })}>
+              I&apos;m home
+            </button>
+          </div>
         </div>
       )}
 
@@ -138,58 +138,30 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
             return (
               <li key={leg.id} className="leg" data-kind={leg.kind} data-state={state}>
                 <span className="leg-time">{leg.start !== null ? formatClock(leg.start) : 'Later'}</span>
+                <span className="leg-node">{ICONS[leg.kind]}</span>
                 <div className="leg-body">
                   <p className="leg-title">{leg.title}</p>
                   <p className="leg-detail">{detail(leg, route)}</p>
                   {leg.note && (leg.kind !== 'bus' || leg.bus) && <p className="leg-detail">{leg.note}</p>}
                   {home && <p className="leg-detail">{home}</p>}
                   {leg.warn && <p className="leg-warn">{leg.warn}</p>}
+                  {inProgress && !leftEarly && (
+                    <button className="button small" onClick={() => classIsOut(leg.classId!)}>
+                      {leg.visit ? 'Done here' : 'Class is out'}
+                    </button>
+                  )}
+                  {leg.kind === 'class' && leg.start! > now && !leftEarly && (
+                    <button className="button small" aria-pressed={Boolean(leg.skipped)} onClick={() => toggleSkip(leg.classId!)}>
+                      {leg.skipped ? 'Skipped, undo' : 'Skip today'}
+                    </button>
+                  )}
                 </div>
-                {inProgress && !leftEarly && (
-                  <button className="button small" onClick={() => classIsOut(leg.classId!)}>
-                    Class is out
-                  </button>
-                )}
-                {leg.kind === 'class' && leg.start! > now && !leftEarly && (
-                  <button className="button small" aria-pressed={Boolean(leg.skipped)} onClick={() => toggleSkip(leg.classId!)}>
-                    {leg.skipped ? 'Skipped' : 'Skip'}
-                  </button>
-                )}
-                {leg.kind === 'gym' && state === 'now' && (
-                  <button className="button small" onClick={() => onChange({ gymDoneAt: now })}>
-                    I'm done
-                  </button>
-                )}
               </li>
             );
           })}
         </ol>
       ) : (
         <p className="note">Nothing planned for the rest of today.</p>
-      )}
-
-      {watch && (
-        <div className="watching">
-          <div>
-            <h3>{watch.next ? `Bus home ${watch.next.here ? 'is at Gammage now' : formatClock(watch.next.at)}` : 'Watching for a bus home'}</h3>
-            <p className="note">
-              {watch.next
-                ? `Leave ${watch.place} by ${formatClock(watch.next.leaveBy)}, ${watch.walkMin} min walk. Home about ${formatClock(watch.next.home)}.`
-                : watch.until
-                  ? `Nothing you could leave ${watch.place} for before your next class.`
-                  : `No bus time right now. You'll hear about each one, timed from ${watch.place}.`}
-              {watch.until === null && ' Alerts for every bus keep coming until you tap one of these.'}
-            </p>
-          </div>
-          <div className="button-row">
-            <button className="button" onClick={() => onChange({ onBusAt: now })}>
-              I'm on the bus
-            </button>
-            <button className="button" onClick={() => onChange({ homeAt: now })}>
-              I'm home
-            </button>
-          </div>
-        </div>
       )}
 
       {(canHeadHome || onCampusNow || committed || hasChoices) && (
@@ -216,8 +188,6 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
           )}
         </div>
       )}
-
-      {plan.service && <p className="note">{plan.service}</p>}
     </section>
   );
 }

@@ -1,9 +1,7 @@
-import { CAMPUS, GYM, HOME, allPlaces, walkMinutes } from './schedule.ts';
+import { CAMPUS, HOME, allPlaces, classesOn, walkMinutes } from './schedule.ts';
 import { formatClock, tempeDayKey, tempeMidnight, tempeWeekday } from './time.ts';
 import type {
-  AfterClass,
   ClassBlock,
-  Evening,
   FeedStatus,
   Place,
   Prefs,
@@ -29,11 +27,9 @@ const WATCH_LEAD_MS = 15 * MIN;
 const PING_LEAD_MS = 10 * MIN;
 /** Two bus times this close are the same bus, so it's only announced once. */
 const SAME_BUS_MS = 10 * MIN;
-/** Alerts run from this long before the first class of the day to this long after the last. */
-export const ALERTS_BEFORE_MS = 2 * 60 * MIN;
-export const ALERTS_AFTER_MS = 60 * MIN;
-/** With nobody saying they're home, the bus-home alerts stop when the alert window does. */
-const WATCH_MAX_MS = ALERTS_AFTER_MS;
+/** Unless someone sets their own: alerts run from this long before the first thing on campus to this long after the last. */
+export const ALERTS_BEFORE_MIN = 120;
+export const ALERTS_AFTER_MIN = 60;
 /** A class counts as "just over" for this long. */
 const JUST_OVER_MS = 2 * MIN;
 /** Still worth heading to a class that started this recently. */
@@ -59,9 +55,9 @@ export type BusTime = {
 
 export type Leg = {
   id: string;
-  kind: 'bus' | 'walk' | 'class' | 'gym';
+  kind: 'bus' | 'walk' | 'class';
   title: string;
-  /** When to set off (bus, walk) or when it begins (class, gym). Null when no bus time is known yet. */
+  /** When to set off (bus, walk) or when it begins (class). Null when no bus time is known yet. */
   start: number | null;
   end: number | null;
   /** Bus legs: the bus being aimed for, and when it gets you to the far stop. */
@@ -73,6 +69,8 @@ export type Leg = {
   /** Where a bus leg finally gets you, for the summary line. */
   goal?: string;
   classId?: string;
+  /** Time on campus that isn't a class. */
+  visit?: boolean;
   room?: string;
   place?: string;
   skipped?: boolean;
@@ -91,16 +89,10 @@ export type Leg = {
 export type DayPlan = {
   date: string;
   weekday: number;
-  gymDay: boolean;
-  /** Classes on today's pattern, skipped or not. */
+  /** Classes and visits today, skipped or not. */
   classCount: number;
-  /** On campus at some point today, so the after-class choice applies. */
+  /** On campus at some point today. */
   onCampus: boolean;
-  afterClass: AfterClass;
-  evening: Evening;
-  eveningLeaveMin: number;
-  /** The evening choice is in play: a gym day with no gym straight after class. */
-  eveningApplies: boolean;
   service: string | null;
   legs: Leg[];
   /** When alerts may be sent today: around the classes being taken. Null on a day without any. */
@@ -129,7 +121,7 @@ export type PlanInput = {
   now: number;
   schedule: Schedule;
   route: Route;
-  prefs: Pick<Prefs, 'walkMinutes' | 'bufferMinutes'>;
+  prefs: Pick<Prefs, 'walkMinutes' | 'bufferMinutes' | 'alertsBeforeMin' | 'alertsAfterMin'>;
   live: LiveBus;
   timetable: Timetable | null;
   progress: Progress | null;
@@ -204,7 +196,7 @@ function noBusReason(ctx: Ctx, tooLate: boolean): string | null {
 type Trip = { legs: Leg[]; arrive: number | null; atLeast?: number };
 
 /** Home to campus. With a deadline it's the latest bus that still makes it; without, the first one after readyAt. */
-function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number | null; goal: string; walkTo: string; walkBy: number | null; startsAt?: number }): Trip {
+function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number | null; goal: string; walkTo: string; walkBy: number | null; startsAt?: number; visit?: boolean }): Trip {
   const { now, route, home, campus } = ctx;
   const ride = rideSeconds(route, home, campus) * 1000;
   const walkHome = ctx.prefs.walkMinutes;
@@ -258,7 +250,7 @@ function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number |
     start: pick.leaveAt,
     end: pick.arrive,
     bus: { ...pick.bus, stopId: HOME, arrive: pick.arrive },
-    ...(late ? { warn: `${verdict}: in the room around ${formatClock(inRoom)}.`, ...(canWalk ? { walkInstead } : {}) } : {}),
+    ...(late ? { warn: `${verdict}: ${o.visit ? 'there' : 'in the room'} around ${formatClock(inRoom)}.`, ...(canWalk ? { walkInstead } : {}) } : {}),
   };
   return { legs: [leg], arrive: pick.arrive };
 }
@@ -325,11 +317,6 @@ function walkLeg(id: string, title: string, start: number, minutes: number): Leg
   return { id, kind: 'walk', title, start, end: start + minutes * MIN, walkMin: minutes };
 }
 
-function gymLeg(start: number, schedule: Schedule, doneAt: number | undefined): Leg {
-  const planned = start + schedule.gym.workoutMin * MIN;
-  return { id: 'gym', kind: 'gym', title: 'Gym', start, end: doneAt !== undefined && doneAt >= start ? doneAt : planned };
-}
-
 /** Works out today: which bus makes the first class, every walk in between, and the way home. */
 export function planDay(input: PlanInput): DayPlan {
   const { now, schedule, route } = input;
@@ -343,33 +330,14 @@ export function planDay(input: PlanInput): DayPlan {
   const home = route.stops.find((s) => s.id === HOME);
   const campus = route.stops.find((s) => s.id === CAMPUS);
 
-  const classes: ClassBlock[] = schedule.patterns
-    .filter((p) => p.days.includes(weekday) && (!p.until || date <= p.until))
-    .flatMap((p) => p.classes)
-    .sort((a, b) => a.startMin - b.startMin);
+  const classes: ClassBlock[] = classesOn(schedule, weekday, date);
   const taken = classes.filter((c) => !skipped.has(c.id));
-  const gymDay = schedule.gym.days.includes(weekday);
-  const afterClass = ov?.afterClass ?? (gymDay ? schedule.gym.afterClass : 'home');
-  const evening = ov?.evening ?? schedule.gym.evening;
-  const eveningLeaveMin = ov?.eveningLeaveMin ?? schedule.gym.eveningLeaveMin;
   const leftEarly = ov?.leftAt !== undefined && ov.leftPlaceId !== undefined;
   const onCampus = taken.length > 0 || leftEarly;
+  const alertsBefore = (input.prefs.alertsBeforeMin ?? ALERTS_BEFORE_MIN) * MIN;
+  const alertsAfter = (input.prefs.alertsAfterMin ?? ALERTS_AFTER_MIN) * MIN;
 
-  const plan: DayPlan = {
-    date,
-    weekday,
-    gymDay,
-    classCount: classes.length,
-    onCampus,
-    afterClass,
-    evening,
-    eveningLeaveMin,
-    eveningApplies: gymDay && !(onCampus && afterClass === 'gym'),
-    service: null,
-    legs: [],
-    alertWindow: null,
-    homeWatch: null,
-  };
+  const plan: DayPlan = { date, weekday, classCount: classes.length, onCampus, service: null, legs: [], alertWindow: null, homeWatch: null };
   if (!home || !campus) return plan;
 
   const timetable = input.timetable;
@@ -382,7 +350,7 @@ export function planDay(input: PlanInput): DayPlan {
     boarded: {},
     lastMs: timetable?.lastSec == null ? null : midnight + timetable.lastSec * 1000,
     walk: (from, to) => walkMinutes(schedule, places, from, to),
-    name: (id) => places.find((p) => p.id === id)?.name ?? 'class',
+    name: (id) => places.find((p) => p.id === id)?.name ?? 'campus',
   };
   // A class that let out early ends when it actually ended.
   const endOf = (c: ClassBlock) => {
@@ -391,31 +359,32 @@ export function planDay(input: PlanInput): DayPlan {
   };
   if (input.progress?.date === date) {
     for (const [id, entry] of Object.entries(input.progress.boarded)) {
-      // Finishing at the gym, or asking to plan again, drops a bus committed to before that.
-      const stale = entry.since <= (ov?.replanAt ?? 0) || (id.startsWith('back') && entry.since <= (ov?.gymDoneAt ?? 0));
-      if (!stale) ctx.boarded[id] = entry;
+      // Asking to plan again drops a bus committed to before that.
+      if (entry.since > (ov?.replanAt ?? 0)) ctx.boarded[id] = entry;
     }
   }
   if (timetable?.runs === false) plan.service = `No bus on ${DAY_NAMES[weekday]}s, going by the last ${timetable.daysSeen}.`;
   else if (ctx.lastMs !== null) plan.service = `Last bus parks around ${formatClock(ctx.lastMs)}${timetable?.lastSure ? '' : ' (seen once)'}.`;
 
-  if (taken.length > 0) {
-    plan.alertWindow = { from: at(taken[0].startMin) - ALERTS_BEFORE_MS, until: endOf(taken.at(-1)!) + ALERTS_AFTER_MS };
-  }
+  // The last thing on campus is whatever ends last, which needn't be what starts last.
+  const last = taken.reduce<ClassBlock | null>((latest, c) => (latest === null || endOf(c) >= endOf(latest) ? c : latest), null);
+  if (last) plan.alertWindow = { from: at(taken[0].startMin) - alertsBefore, until: endOf(last) + alertsAfter };
 
   const legs: Leg[] = [];
 
   // Getting to the first class that can still be made.
   const target = taken.find((c) => at(c.startMin) > now - LATE_START_MS);
   if (!leftEarly && target && (ctx.boarded.out || target === taken[0] || endOf(taken[0]) < now)) {
+    const visit = target.kind === 'visit';
     const inRoomBy = at(target.startMin) - schedule.arriveEarlyMin * MIN;
     const toRoom = ctx.walk(CAMPUS, target.placeId);
-    const trip = outbound(ctx, { id: 'out', readyAt: 0, deadline: inRoomBy - toRoom * MIN, goal: target.course, walkTo: target.placeId, walkBy: inRoomBy, startsAt: at(target.startMin) });
+    const goal = target.course || 'campus';
+    const trip = outbound(ctx, { id: 'out', readyAt: 0, deadline: inRoomBy - toRoom * MIN, goal, walkTo: target.placeId, walkBy: inRoomBy, startsAt: at(target.startMin), visit });
     legs.push(...trip.legs);
-    if (trip.arrive !== null) {
+    if (trip.arrive !== null && toRoom > 0) {
       const early = Math.round((at(target.startMin) - trip.arrive) / MIN) - toRoom;
       const walkIn = walkLeg('walk-in', `Walk to ${ctx.name(target.placeId)}`, trip.arrive, toRoom);
-      if (early > 0) walkIn.note = `In the room about ${early} min before ${target.course}.`;
+      if (early > 0) walkIn.note = visit ? `There about ${early} min early.` : `In the room about ${early} min before ${goal}.`;
       legs.push(walkIn);
     }
   }
@@ -425,11 +394,12 @@ export function planDay(input: PlanInput): DayPlan {
     const leg: Leg = {
       id: `class:${c.id}`,
       kind: 'class',
-      title: c.course,
+      title: c.course || 'On campus',
       start: at(c.startMin),
       end: endOf(c),
       classId: c.id,
       place: ctx.name(c.placeId),
+      ...(c.kind === 'visit' ? { visit: true } : {}),
       ...(c.room ? { room: c.room } : {}),
       ...(skipped.has(c.id) ? { skipped: true } : {}),
     };
@@ -451,54 +421,16 @@ export function planDay(input: PlanInput): DayPlan {
     legs.push(leg);
   }
 
-  const eveningFlow = (homeAt: number | null) => {
-    if (evening === 'skip') return;
-    const leave = Math.max(at(eveningLeaveMin), homeAt ?? 0);
-    if (evening === 'walk') {
-      const gym = gymLeg(leave + ctx.walk(HOME, GYM) * MIN, schedule, ov?.gymDoneAt);
-      legs.push(walkLeg('walk-out', 'Walk to the gym', leave, ctx.walk(HOME, GYM)), gym, walkLeg('walk-back', 'Walk home', gym.end!, ctx.walk(GYM, HOME)));
-      return;
-    }
-    const trip = outbound(ctx, { id: 'out2', readyAt: leave, deadline: null, goal: 'Gym', walkTo: GYM, walkBy: null });
-    legs.push(...trip.legs);
-    let gymStart: number | null = null;
-    if (trip.arrive !== null) {
-      const toGym = ctx.walk(CAMPUS, GYM);
-      legs.push(walkLeg('walk-gym2', 'Walk to the gym', trip.arrive, toGym));
-      gymStart = trip.arrive + toGym * MIN;
-    } else if (trip.legs[0].kind === 'walk') {
-      // No bus out, so the walk leg already ends at the gym.
-      gymStart = trip.legs[0].end;
-    }
-    if (gymStart === null) return;
-    const gym = gymLeg(gymStart, schedule, ov?.gymDoneAt);
-    legs.push(gym, ...homeward(ctx, { id: 'back2', from: GYM, readyAt: gym.end! }).legs);
-  };
-
   // Said "I'm on the bus" or "I'm home": the campus part of the day is over.
   const headedHome = ov?.homeAt ?? ov?.onBusAt;
-  if (onCampus && headedHome !== undefined) {
-    const homeTime = ov?.homeAt ?? ov!.onBusAt! + rideSeconds(route, campus, home) * 1000 + input.prefs.walkMinutes * MIN;
-    if (gymDay && ov?.gymDoneAt === undefined) eveningFlow(homeTime);
-  } else if (onCampus) {
-    const last = taken.at(-1);
-    let cursor = leftEarly ? { placeId: ov!.leftPlaceId!, at: ov!.leftAt! } : { placeId: last!.placeId, at: endOf(last!) };
-    if (afterClass === 'gym') {
-      const toGym = ctx.walk(cursor.placeId, GYM);
-      const gym = gymLeg(cursor.at + toGym * MIN, schedule, ov?.gymDoneAt);
-      legs.push(walkLeg('walk-gym', 'Walk to the gym', cursor.at, toGym), gym);
-      cursor = { placeId: GYM, at: gym.end! };
-    }
-    const trip = homeward(ctx, { id: 'back', from: cursor.placeId, readyAt: cursor.at });
-    legs.push(...trip.legs);
-    if (gymDay && afterClass === 'home') eveningFlow(trip.arrive ?? trip.atLeast ?? null);
-  } else if (gymDay) {
-    eveningFlow(null);
+  if (onCampus && headedHome === undefined) {
+    const cursor = leftEarly ? { placeId: ov!.leftPlaceId!, at: ov!.leftAt! } : { placeId: last!.placeId, at: endOf(last!) };
+    legs.push(...homeward(ctx, { id: 'back', from: cursor.placeId, readyAt: cursor.at }).legs);
   }
 
   // The ride home is watched from the class that's ending or just ended. Nothing is assumed about
-  // the gym or about having left: it stays on that class until the next one starts, and after the
-  // last class it carries on until you say you're on the bus or home.
+  // having left: it stays on that class until the next one starts, and after the last one it
+  // carries on until you say you're on the bus or home.
   if (onCampus && headedHome === undefined) {
     let anchor: { classId: string | null; course: string | null; placeId: string; freeAt: number; until: number | null } | null = null;
     if (leftEarly) {
@@ -508,10 +440,11 @@ export function planDay(input: PlanInput): DayPlan {
       if (index !== -1) {
         const c = taken[index];
         const following = taken[index + 1];
-        anchor = { classId: c.id, course: c.course, placeId: c.placeId, freeAt: endOf(c), until: following ? at(following.startMin) : null };
+        anchor = { classId: c.id, course: c.course || null, placeId: c.placeId, freeAt: endOf(c), until: following ? at(following.startMin) : null };
       }
     }
-    const over = anchor !== null && (anchor.until !== null ? now >= anchor.until : now > anchor.freeAt + WATCH_MAX_MS);
+    // With nobody saying they're home, the bus-home alerts stop when the alert window does.
+    const over = anchor !== null && (anchor.until !== null ? now >= anchor.until : now > anchor.freeAt + alertsAfter);
     if (anchor && !over) {
       const walkMin = ctx.walk(anchor.placeId, CAMPUS);
       const first = homeBuses(ctx, anchor.freeAt, walkMin)[0];
@@ -628,9 +561,9 @@ export function headsUpAlerts(plan: DayPlan, route: Route, now: number, fired: s
 }
 
 /**
- * Which alerts actually go out. With classes set up, the phone only hears about buses around his
- * time on campus: two hours before the first class to an hour after the last. Outside that, only a
- * watch he started by hand gets through, and only for the bus he's watching.
+ * Which alerts actually go out. With classes set up, the phone only hears about buses around the
+ * person's time on campus (two hours before the first class to an hour after the last, unless they
+ * set their own). Outside that, only a watch started by hand gets through, and only for that bus.
  */
 export function withinAlertWindow<T extends { kind: string }>(events: T[], plan: DayPlan | null, now: number, watchingByHand: boolean): T[] {
   if (plan === null) return events;
@@ -681,12 +614,7 @@ export function planAnswer(plan: DayPlan, route: Route, now: number): PlanAnswer
       return { tone: 'calm', lead: `${leg.title} at`, headline: formatClock(leg.start!), detail: [leg.place, leg.room].filter(Boolean).join(', ') + '.' };
     }
     const home = leg.after ? ` To go home after this: leave by ${formatClock(leg.after.leaveBy)} for the ${formatClock(leg.after.at)} bus.` : '';
-    return { tone: 'calm', lead: `In ${leg.title} until`, headline: formatClock(leg.end!), detail: `${then}${home}`.trim() };
-  }
-
-  if (leg.kind === 'gym') {
-    if (leg.start! > now) return { tone: 'calm', lead: 'Gym at', headline: formatClock(leg.start!), detail: then.trim() };
-    return { tone: 'calm', lead: 'At the gym until about', headline: formatClock(leg.end!), detail: then.trim() };
+    return { tone: 'calm', lead: leg.visit ? `${leg.title} until` : `In ${leg.title} until`, headline: formatClock(leg.end!), detail: `${then}${home}`.trim() };
   }
 
   const walking = leg.start! <= now;

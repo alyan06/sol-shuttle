@@ -4,8 +4,8 @@ const URL_BASE = process.env.APP_URL ?? 'http://localhost:3240';
 for (;;) {
   try {
     const res = await fetch(`${URL_BASE}/api/tick`, { method: 'POST' });
-    const { status, sent = [], error } = await res.json();
-    console.log(new Date().toLocaleTimeString(), error ?? status, sent.map((e) => e.kind).join(', '));
+    const { status, people = 0, sent = [], error } = await res.json();
+    console.log(new Date().toLocaleTimeString(), error ?? status, people + ' people', sent.join(', '));
   } catch (err) {
     console.log('tick failed:', err.message);
   }

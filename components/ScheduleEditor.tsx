@@ -1,194 +1,196 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PlanChange } from '@/app/api/plan/route';
-import { CAMPUS, GYM, HOME, allPlaces, walkKey, walkMinutes } from '@/lib/schedule.ts';
-import { inputToMinute, minuteToInput } from '@/lib/time.ts';
-import type { AfterClass, ClassBlock, Evening, Pattern, Place, Route, Schedule } from '@/lib/types.ts';
-import { storePasscode, storedPasscode } from './useSettings';
+import buildingList from '@/lib/buildings.json';
+import { CAMPUS, allPlaces, walkKey, walkMinutes } from '@/lib/schedule.ts';
+import { formatMinute, inputToMinute, minuteToInput } from '@/lib/time.ts';
+import type { ClassBlock, Place, Route, Schedule } from '@/lib/types.ts';
+import { post, useAccount } from './Account';
+import { TopBar } from './AppShell';
+import { DayPicker, Stepper } from './controls';
+import { JoinGate, SignInCard } from './SignIn';
 
-const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+type Building = { code: string; name: string; lat: number; lng: number };
+const BUILDINGS = buildingList as Building[];
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const PACES = [
-  { value: 70, label: 'Easy' },
-  { value: 80, label: 'Steady' },
-  { value: 92, label: 'Brisk' },
-];
-/** Roughly the Tempe campus, so a building search can't wander off to another city. */
-const CAMPUS_BOX = '-111.946,33.4275,-111.924,33.4105';
-
-type Found = { name: string; where: string; lat: number; lng: number };
 
 const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 
-async function findBuilding(query: string): Promise<Found[]> {
-  const pasted = query.match(/^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/);
-  if (pasted) return [{ name: 'Pasted location', where: '', lat: Number(pasted[1]), lng: Number(pasted[2]) }];
-  const url = new URL('https://nominatim.openstreetmap.org/search');
-  url.search = new URLSearchParams({ q: query, format: 'json', limit: '5', viewbox: CAMPUS_BOX, bounded: '1' }).toString();
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(String(res.status));
-  const rows = (await res.json()) as { display_name: string; lat: string; lon: string }[];
-  return rows.map((row) => {
-    // "Hayden Library, 300, East Orange Mall, Tempe, ...": the name, then the street past any house number.
-    const [name, ...rest] = row.display_name.split(',').map((part) => part.trim());
-    return { name, where: rest.find((part) => !/^\d+$/.test(part)) ?? '', lat: Number(row.lat), lng: Number(row.lon) };
-  });
+/** A stable id for a building from ASU's list. Codes repeat (two wings share one), so the name is folded in. */
+function buildingId(building: Building): string {
+  let hash = 0;
+  for (const char of building.name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return `b:${building.code}-${hash.toString(36)}`.slice(0, 40);
 }
 
-function DayPicker({ label, days, onChange }: { label: string; days: number[]; onChange: (days: number[]) => void }) {
+function daysLabel(days: number[]): string {
+  if (days.length === 0) return 'No days yet';
+  if (days.join() === '1,2,3,4,5') return 'Weekdays';
+  if (days.length === 7) return 'Every day';
+  return days.map((day) => DAY_SHORT[day]).join(', ');
+}
+
+/** The first other block that shares a day and overlaps in time, if any. */
+function overlap(block: ClassBlock, all: ClassBlock[]): { other: ClassBlock; day: number } | null {
+  for (const other of all) {
+    if (other.id === block.id) continue;
+    const day = block.days.find((d) => other.days.includes(d));
+    if (day !== undefined && block.startMin < other.endMin && other.startMin < block.endMin) return { other, day };
+  }
+  return null;
+}
+
+type Draft = ClassBlock & { isNew: boolean; walkMin: number | null; place: Place | null };
+
+function BuildingSearch({ own, allowStop, onPick, onBack }: { own: Place[]; allowStop: boolean; onPick: (place: Place | null) => void; onBack: () => void }) {
+  const [query, setQuery] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => input.current?.focus(), []);
+
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = useMemo(() => {
+    if (words.length === 0) return BUILDINGS;
+    const scored = BUILDINGS.flatMap((building) => {
+      const name = building.name.toLowerCase();
+      const code = building.code.toLowerCase();
+      if (!words.every((word) => name.includes(word) || code.startsWith(word))) return [];
+      // What's printed on a class schedule is the code, so a code match comes first.
+      return [{ building, rank: code === words[0] ? 0 : code.startsWith(words[0]) ? 1 : 2 }];
+    });
+    return scored.sort((a, b) => a.rank - b.rank).map((entry) => entry.building);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+  const custom = own.filter((place) => !place.id.startsWith('b:') && (words.length === 0 || words.every((word) => place.name.toLowerCase().includes(word))));
+
   return (
-    <div className="days" role="group" aria-label={label}>
-      {DAYS.map((letter, day) => (
-        <button
-          key={DAY_NAMES[day]}
-          type="button"
-          className="day"
-          aria-label={DAY_NAMES[day]}
-          aria-pressed={days.includes(day)}
-          onClick={() => onChange(days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort())}
-        >
-          {letter}
+    <div className="picker">
+      <div className="picker-head">
+        <button type="button" className="button quiet small" onClick={onBack}>
+          Back
         </button>
-      ))}
-    </div>
-  );
-}
-
-function Stepper({ value, unit, min, max, step = 1, onChange, label }: { value: number; unit: string; min: number; max: number; step?: number; onChange: (value: number) => void; label: string }) {
-  return (
-    <div className="stepper" role="group" aria-label={label}>
-      <button type="button" className="button" aria-label="Less" disabled={value <= min} onClick={() => onChange(Math.max(min, value - step))}>
-        −
-      </button>
-      <output>
-        {value} {unit}
-      </output>
-      <button type="button" className="button" aria-label="More" disabled={value >= max} onClick={() => onChange(Math.min(max, value + step))}>
-        +
-      </button>
-    </div>
-  );
-}
-
-function Segmented<T extends string | number>({ label, options, value, onPick }: { label: string; options: { value: T; label: string }[]; value: T; onPick: (value: T) => void }) {
-  return (
-    <div className="segmented" role="group" aria-label={label}>
-      {options.map((option) => (
-        <button key={String(option.value)} type="button" aria-pressed={option.value === value} onClick={() => onPick(option.value)}>
-          {option.label}
-        </button>
-      ))}
+        <label className="field grow">
+          <span className="visually-hidden">Search ASU buildings</span>
+          <input ref={input} type="search" value={query} placeholder="Search by name or code, like COOR" enterKeyHint="search" onChange={(e) => setQuery(e.target.value)} />
+        </label>
+      </div>
+      <ul className="picker-list">
+        {allowStop && words.length === 0 && (
+          <li>
+            <button type="button" onClick={() => onPick(null)}>
+              <span>The Gammage stop</span>
+              <small>No walk</small>
+            </button>
+          </li>
+        )}
+        {custom.map((place) => (
+          <li key={place.id}>
+            <button type="button" onClick={() => onPick(place)}>
+              <span>{place.name}</span>
+              <small>Yours</small>
+            </button>
+          </li>
+        ))}
+        {matches.map((building) => (
+          <li key={`${building.code}:${building.name}`}>
+            <button type="button" onClick={() => onPick({ id: buildingId(building), name: building.name, code: building.code, lat: building.lat, lng: building.lng })}>
+              <span>{building.name}</span>
+              <small>{building.code}</small>
+            </button>
+          </li>
+        ))}
+        {matches.length === 0 && custom.length === 0 && <li className="picker-empty">No Tempe campus building matches that. Try the code from your class schedule.</li>}
+      </ul>
     </div>
   );
 }
 
 export default function ScheduleEditor({ route }: { route: Route }) {
-  const [passcode, setPasscode] = useState<string | null>(null);
-  const [draftCode, setDraftCode] = useState('');
+  const account = useAccount();
+  const joined = account.status === 'ready' && account.view!.user.joined;
   const [schedule, setSchedule] = useState<Schedule | null>(null);
-  const [status, setStatus] = useState<'loading' | 'locked' | 'ready' | 'failed'>('loading');
-  const [dirty, setDirty] = useState(false);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [newName, setNewName] = useState('');
-  const [found, setFound] = useState<Found[] | null>(null);
-  const [searching, setSearching] = useState(false);
-
-  useEffect(() => setPasscode(storedPasscode()), []);
+  const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
-    if (passcode === null) return;
+    if (!joined) return;
     let cancelled = false;
-    fetch('/api/plan', { cache: 'no-store', headers: { 'x-passcode': passcode } })
+    fetch('/api/plan', { cache: 'no-store' })
       .then(async (res) => {
-        if (cancelled) return;
-        if (res.status === 401) return setStatus('locked');
         if (!res.ok) throw new Error(String(res.status));
-        setSchedule(((await res.json()) as { schedule: Schedule }).schedule);
-        setStatus('ready');
+        const body = (await res.json()) as { schedule: Schedule };
+        if (!cancelled) {
+          setSchedule(body.schedule);
+          setStatus('ready');
+        }
       })
       .catch(() => !cancelled && setStatus('failed'));
     return () => {
       cancelled = true;
     };
-  }, [passcode]);
+  }, [joined]);
+
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (draft && !element.open) element.showModal();
+    if (!draft && element.open) element.close();
+  }, [draft]);
 
   const places = useMemo(() => (schedule ? allPlaces(schedule, route) : []), [schedule, route]);
+  const sorted = useMemo(
+    () => [...(schedule?.classes ?? [])].sort((a, b) => (a.days[0] ?? 7) - (b.days[0] ?? 7) || a.startMin - b.startMin),
+    [schedule],
+  );
 
-  function edit(change: Partial<Schedule>) {
-    setSchedule((current) => current && { ...current, ...change });
-    setDirty(true);
+  function open(block: ClassBlock | null, kind: 'class' | 'visit' = 'class') {
     setMessage(null);
-  }
-
-  function editPattern(id: string, change: Partial<Pattern>) {
-    edit({ patterns: schedule!.patterns.map((p) => (p.id === id ? { ...p, ...change } : p)) });
-  }
-
-  function editClass(patternId: string, classId: string, change: Partial<ClassBlock>) {
-    const pattern = schedule!.patterns.find((p) => p.id === patternId)!;
-    editPattern(patternId, { classes: pattern.classes.map((c) => (c.id === classId ? { ...c, ...change } : c)) });
-  }
-
-  function addClass(pattern: Pattern) {
-    const last = pattern.classes.at(-1);
-    const startMin = last ? Math.min(last.endMin + 15, 22 * 60) : 9 * 60;
-    const block: ClassBlock = { id: newId('c'), course: '', placeId: schedule!.places[0]?.id ?? '', startMin, endMin: startMin + 75 };
-    editPattern(pattern.id, { classes: [...pattern.classes, block] });
-  }
-
-  function setWalk(a: string, b: string, minutes: number) {
-    edit({ walkOverrides: { ...schedule!.walkOverrides, [walkKey(a, b)]: minutes } });
-  }
-
-  async function search(event: FormEvent) {
-    event.preventDefault();
-    if (!query.trim()) return;
-    setSearching(true);
-    setFound(null);
-    try {
-      setFound(await findBuilding(query));
-    } catch {
-      setMessage("Couldn't search right now. Paste the building's coordinates instead, like 33.4236, -111.9397.");
-    } finally {
-      setSearching(false);
+    setPicking(false);
+    if (block) {
+      const place = schedule!.places.find((p) => p.id === block.placeId) ?? null;
+      setDraft({ ...block, isNew: false, walkMin: null, place });
+      return;
     }
+    const last = sorted.filter((c) => (c.kind ?? 'class') === kind).at(-1);
+    const startMin = kind === 'class' ? 9 * 60 : 10 * 60;
+    setDraft({
+      id: newId('c'),
+      course: '',
+      placeId: kind === 'visit' ? CAMPUS : '',
+      startMin,
+      endMin: startMin + (kind === 'class' ? 75 : 120),
+      days: last?.days ?? (kind === 'class' ? [1, 3] : [5]),
+      ...(kind === 'visit' ? { kind: 'visit' as const } : {}),
+      isNew: true,
+      walkMin: null,
+      place: null,
+    });
   }
 
-  function addPlace(hit: Found) {
-    const place: Place = { id: newId('p'), name: newName.trim() || hit.name, lat: hit.lat, lng: hit.lng };
-    edit({ places: [...schedule!.places, place] });
-    setFound(null);
-    setQuery('');
-    setNewName('');
-  }
+  const edit = (change: Partial<Draft>) => setDraft((current) => current && { ...current, ...change });
 
-  function removePlace(id: string) {
-    const used = schedule!.patterns.some((p) => p.classes.some((c) => c.placeId === id));
-    if (used) return setMessage('A class still meets in that building. Move the class first.');
-    edit({ places: schedule!.places.filter((p) => p.id !== id) });
-  }
-
-  async function save() {
+  /** Sends the whole schedule with one block added, changed or removed. Buildings nothing meets in are dropped. */
+  async function commit(classes: ClassBlock[], extraPlace: Place | null, walk: { placeId: string; minutes: number } | null) {
     if (!schedule) return;
-    const unplaced = schedule.patterns.flatMap((p) => p.classes).find((c) => !c.course.trim() || !c.placeId || c.endMin <= c.startMin);
-    if (unplaced) return setMessage('Each class needs a name, a building, and an end time after its start.');
     setSaving(true);
     setMessage(null);
+    const known = new Map(schedule.places.map((place) => [place.id, place]));
+    if (extraPlace) known.set(extraPlace.id, extraPlace);
+    const used = new Set(classes.map((block) => block.placeId));
+    const nextPlaces = [...known.values()].filter((place) => used.has(place.id));
+    const walkOverrides = { ...schedule.walkOverrides };
+    if (walk) walkOverrides[walkKey(CAMPUS, walk.placeId)] = walk.minutes;
     try {
-      const { override: _today, ...rest } = schedule;
-      const body: PlanChange = { schedule: rest };
-      const res = await fetch('/api/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-passcode': passcode ?? '' },
-        body: JSON.stringify(body),
-      });
+      const body: PlanChange = { schedule: { places: nextPlaces, classes, walkOverrides } };
+      const res = await post('/api/plan', body);
       if (!res.ok) throw new Error(String(res.status));
-      setDirty(false);
-      setMessage('Saved.');
+      setSchedule(((await res.json()) as { schedule: Schedule }).schedule);
+      setDraft(null);
     } catch {
       setMessage("Couldn't save. Check your connection and try again.");
     } finally {
@@ -196,231 +198,202 @@ export default function ScheduleEditor({ route }: { route: Route }) {
     }
   }
 
-  if (status === 'locked') {
+  function save() {
+    if (!draft || !schedule) return;
+    const visit = draft.kind === 'visit';
+    if (!visit && !draft.course.trim()) return setMessage('Give the class a name, like CSE 240.');
+    if (draft.days.length === 0) return setMessage('Pick at least one day.');
+    if (draft.endMin <= draft.startMin) return setMessage('It has to end after it starts.');
+    if (!draft.placeId) return setMessage('Choose the building it meets in.');
+    const { isNew: _new, walkMin, place, ...block } = draft;
+    const rest = schedule.classes.filter((c) => c.id !== block.id);
+    const walk = walkMin !== null && block.placeId !== CAMPUS ? { placeId: block.placeId, minutes: walkMin } : null;
+    commit([...rest, { ...block, course: block.course.trim() }], place, walk);
+  }
+
+  if (account.status !== 'ready' || !joined) {
     return (
-      <main className="app single">
-        <form
-          className="section gate"
-          onSubmit={(event) => {
-            event.preventDefault();
-            storePasscode(draftCode);
-            setStatus('loading');
-            setPasscode(draftCode);
-          }}
-        >
-          <h2>Your schedule is locked</h2>
-          <label className="field">
-            <span>Passcode</span>
-            <input type="password" autoComplete="current-password" value={draftCode} onChange={(e) => setDraftCode(e.target.value)} />
-          </label>
-          {passcode && <p className="error">That passcode is wrong.</p>}
-          <button className="button primary" type="submit" disabled={!draftCode}>
-            Unlock
-          </button>
-        </form>
+      <main className="page">
+        <TopBar />
+        <header className="page-head">
+          <h1>Classes</h1>
+          <p>When you need to be on campus. The bus there and back is planned around it.</p>
+        </header>
+        <div className="stack">
+          {account.status === 'signed-out' && <SignInCard title="Sign in to add your classes" />}
+          {account.status === 'ready' && <JoinGate />}
+          {account.status === 'loading' && <p className="note">Loading…</p>}
+          {account.status === 'failed' && (
+            <button className="button" onClick={account.reload}>
+              Couldn&apos;t load your account. Try again
+            </button>
+          )}
+        </div>
       </main>
     );
   }
 
-  if (status !== 'ready' || !schedule) {
-    return (
-      <main className="app single">
-        <p className="section note">{status === 'failed' ? "Couldn't load your schedule. Reload to try again." : 'Loading your schedule…'}</p>
-      </main>
-    );
-  }
-
-  const { gym } = schedule;
-  const walk = (a: string, b: string) => walkMinutes(schedule, places, a, b);
+  const draftPlaceName = draft ? (draft.placeId === CAMPUS ? 'The Gammage stop' : (draft.place?.name ?? places.find((p) => p.id === draft.placeId)?.name ?? '')) : '';
+  const estimate = draft && schedule && draft.placeId && draft.placeId !== CAMPUS ? walkMinutes(schedule, draft.place ? [...places, draft.place] : places, CAMPUS, draft.placeId) : null;
 
   return (
-    <main className="app single">
-      <header className="top">
-        <Link className="text-link" href="/">
-          Back to today
-        </Link>
-        <span className="freshness">{dirty ? 'Unsaved changes' : ''}</span>
+    <main className="page">
+      <TopBar />
+      <header className="page-head">
+        <h1>Classes</h1>
+        <p>When you need to be on campus. The bus there and back is planned around it.</p>
       </header>
-      <section className="answer">
-        <h1 className="page-title">Schedule</h1>
-        <p className="answer-detail">Kept in your private database, behind the passcode. It never goes into the app's public code.</p>
-      </section>
 
-      <section className="section" aria-labelledby="buildings-title">
-        <h2 id="buildings-title">Buildings</h2>
-        <p className="note">Add each building you have a class in. The walk from Gammage is an estimate until you correct it.</p>
-        {schedule.places.length > 0 && (
-          <ul className="rows">
-            {schedule.places.map((place) => (
-              <li key={place.id}>
-                <input
-                  className="bare"
-                  aria-label="Building name"
-                  value={place.name}
-                  onChange={(e) => edit({ places: schedule.places.map((p) => (p.id === place.id ? { ...p, name: e.target.value } : p)) })}
-                />
-                <button type="button" className="button quiet small" onClick={() => removePlace(place.id)}>
-                  Remove
-                </button>
-                <span className="note">Walk from Gammage</span>
-                <Stepper label={`Walk from Gammage to ${place.name}`} value={walk(CAMPUS, place.id)} unit="min" min={1} max={40} onChange={(v) => setWalk(CAMPUS, place.id, v)} />
-              </li>
-            ))}
-          </ul>
-        )}
-        <form className="finder" onSubmit={search}>
-          <label className="field">
-            <span>Find a building on campus</span>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Coor Hall" enterKeyHint="search" />
-          </label>
-          <label className="field">
-            <span>Call it</span>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="COOR" />
-          </label>
-          <button className="button" type="submit" disabled={searching || !query.trim()}>
-            {searching ? 'Searching…' : 'Find'}
-          </button>
-        </form>
-        {found && found.length === 0 && <p className="note">Nothing on campus by that name. Try the full building name, or paste coordinates from a maps app.</p>}
-        {found && found.length > 0 && (
-          <ul className="results">
-            {found.map((hit) => (
-              <li key={`${hit.lat},${hit.lng}`}>
-                <button type="button" className="button" onClick={() => addPlace(hit)}>
-                  Add {hit.name}
-                  {hit.where && <small> on {hit.where}</small>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <div className="stack">
+        {status === 'loading' && <p className="note">Loading your classes…</p>}
+        {status === 'failed' && <p className="error">Couldn&apos;t load your classes. Reload to try again.</p>}
 
-      {schedule.patterns.map((pattern) => (
-        <section className="section" key={pattern.id} aria-label={pattern.name}>
-          <h2>{pattern.name}</h2>
-          <DayPicker label={`Days for ${pattern.name}`} days={pattern.days} onChange={(days) => editPattern(pattern.id, { days })} />
-          {pattern.classes.map((block) => (
-            <fieldset className="class-card" key={block.id}>
-              <legend className="visually-hidden">{block.course || 'New class'}</legend>
-              <div className="times">
-                <label className="field">
-                  <span>Class</span>
-                  <input value={block.course} placeholder="CSE 205" onChange={(e) => editClass(pattern.id, block.id, { course: e.target.value })} />
-                </label>
-                <label className="field">
-                  <span>Room</span>
-                  <input value={block.room ?? ''} placeholder="Optional" onChange={(e) => editClass(pattern.id, block.id, { room: e.target.value || undefined })} />
-                </label>
-              </div>
-              <label className="field">
-                <span>Building</span>
-                <select value={block.placeId} onChange={(e) => editClass(pattern.id, block.id, { placeId: e.target.value })}>
-                  <option value="" disabled>
-                    {schedule.places.length > 0 ? 'Choose a building' : 'Add a building above first'}
-                  </option>
-                  {schedule.places.map((place) => (
-                    <option key={place.id} value={place.id}>
-                      {place.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="times">
-                <label className="field">
-                  <span>Starts</span>
-                  <input type="time" value={minuteToInput(block.startMin)} onChange={(e) => e.target.value && editClass(pattern.id, block.id, { startMin: inputToMinute(e.target.value) })} />
-                </label>
-                <label className="field">
-                  <span>Ends</span>
-                  <input type="time" value={minuteToInput(block.endMin)} onChange={(e) => e.target.value && editClass(pattern.id, block.id, { endMin: inputToMinute(e.target.value) })} />
-                </label>
-              </div>
-              <button type="button" className="button quiet small" onClick={() => editPattern(pattern.id, { classes: pattern.classes.filter((c) => c.id !== block.id) })}>
-                Remove class
+        {status === 'ready' && schedule && (
+          <>
+            {sorted.length === 0 ? (
+              <section className="panel empty">
+                <h2>Nothing here yet</h2>
+                <p className="note">Add each class with its days, times and building. On those days the app picks the bus that gets you there, and tells you which one gets you home.</p>
+              </section>
+            ) : (
+              <ul className="blocks">
+                {sorted.map((block) => {
+                  const clash = overlap(block, sorted);
+                  const place = block.placeId === CAMPUS ? 'Gammage stop' : (places.find((p) => p.id === block.placeId)?.name ?? 'No building');
+                  const walk = block.placeId === CAMPUS ? null : walkMinutes(schedule, places, CAMPUS, block.placeId);
+                  return (
+                    <li key={block.id}>
+                      <button className="block" onClick={() => open(block)}>
+                        <span className="block-top">
+                          <strong>{block.course || 'On campus'}</strong>
+                          <span className="block-days">{daysLabel(block.days)}</span>
+                        </span>
+                        <span className="block-line">
+                          {formatMinute(block.startMin)} to {formatMinute(block.endMin)}
+                        </span>
+                        <span className="block-line muted">
+                          {[place, block.room].filter(Boolean).join(', ')}
+                          {walk !== null && ` · ${walk} min from the stop`}
+                          {block.until && ` · until ${block.until}`}
+                        </span>
+                        {clash && (
+                          <span className="block-warn">
+                            Overlaps {clash.other.course || 'another time'} on {DAY_NAMES[clash.day]}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="button-row wrap">
+              <button className="button primary" onClick={() => open(null, 'class')}>
+                Add a class
               </button>
-            </fieldset>
-          ))}
-          <button type="button" className="button" onClick={() => addClass(pattern)}>
-            Add a class
-          </button>
-          <label className="field">
-            <span>Last day of these classes (optional)</span>
-            <input type="date" value={pattern.until ?? ''} onChange={(e) => editPattern(pattern.id, { until: e.target.value || undefined })} />
-          </label>
-        </section>
-      ))}
-
-      <section className="section" aria-labelledby="gym-title">
-        <h2 id="gym-title">Gym</h2>
-        <p className="note">Sun Devil Fitness Complex. Days left off are rest days: the plan is just the bus home.</p>
-        <DayPicker label="Gym days" days={gym.days} onChange={(days) => edit({ gym: { ...gym, days } })} />
-        <div className="setting">
-          <span>Workout length</span>
-          <Stepper label="Workout length" value={gym.workoutMin} unit="min" min={20} max={180} step={5} onChange={(workoutMin) => edit({ gym: { ...gym, workoutMin } })} />
-        </div>
-        <div className="setting">
-          <span>After class, usually</span>
-          <Segmented<AfterClass>
-            label="After class, usually"
-            value={gym.afterClass}
-            options={[
-              { value: 'gym', label: 'Gym' },
-              { value: 'home', label: 'Home' },
-            ]}
-            onPick={(afterClass) => edit({ gym: { ...gym, afterClass } })}
-          />
-        </div>
-        <div className="setting">
-          <span>From home, usually</span>
-          <Segmented<Evening>
-            label="Getting to the gym from home, usually"
-            value={gym.evening}
-            options={[
-              { value: 'bus', label: 'Bus' },
-              { value: 'walk', label: 'Walk' },
-              { value: 'skip', label: 'Skip' },
-            ]}
-            onPick={(evening) => edit({ gym: { ...gym, evening } })}
-          />
-        </div>
-        <label className="field">
-          <span>Leave home for the gym at</span>
-          <input type="time" value={minuteToInput(gym.eveningLeaveMin)} onChange={(e) => e.target.value && edit({ gym: { ...gym, eveningLeaveMin: inputToMinute(e.target.value) } })} />
-        </label>
-      </section>
-
-      <section className="section" aria-labelledby="walking-title">
-        <h2 id="walking-title">Walking</h2>
-        <div className="setting">
-          <span>Pace</span>
-          <Segmented<number> label="Walking pace" value={schedule.paceMPerMin} options={PACES} onPick={(paceMPerMin) => edit({ paceMPerMin })} />
-        </div>
-        <div className="setting">
-          <span>In the room before class</span>
-          <Stepper label="Minutes early to class" value={schedule.arriveEarlyMin} unit="min" min={0} max={20} onChange={(arriveEarlyMin) => edit({ arriveEarlyMin })} />
-        </div>
-        <div className="setting">
-          <span>Gammage to the gym</span>
-          <Stepper label="Walk from Gammage to the gym" value={walk(CAMPUS, GYM)} unit="min" min={1} max={40} onChange={(v) => setWalk(CAMPUS, GYM, v)} />
-        </div>
-        <div className="setting">
-          <span>Home to the gym</span>
-          <Stepper label="Walk from home to the gym" value={walk(HOME, GYM)} unit="min" min={10} max={90} onChange={(v) => setWalk(HOME, GYM, v)} />
-        </div>
-        <p className="note">Estimates follow the street grid at your pace. A time you set here replaces the estimate.</p>
-      </section>
-
-      <div className="save-bar">
-        {message && (
-          <p className={message === 'Saved.' ? 'note' : 'error'} role="status">
-            {message}
-          </p>
+              <button className="button" onClick={() => open(null, 'visit')}>
+                Add other time on campus
+              </button>
+            </div>
+            <p className="note fine">Other time on campus is for anything that isn&apos;t a class: the library, a job, a club. You get the same bus there, bus home and alerts.</p>
+          </>
         )}
-        <button className="button primary" onClick={save} disabled={saving || !dirty}>
-          {saving ? 'Saving…' : dirty ? 'Save schedule' : 'Saved'}
-        </button>
       </div>
+
+      <dialog ref={dialog} className="sheet" onClose={() => setDraft(null)} aria-labelledby="sheet-title">
+        {draft && picking && (
+          <BuildingSearch
+            own={schedule?.places ?? []}
+            allowStop={draft.kind === 'visit'}
+            onBack={() => setPicking(false)}
+            onPick={(place) => {
+              edit({ placeId: place?.id ?? CAMPUS, place, walkMin: null });
+              setPicking(false);
+            }}
+          />
+        )}
+        {draft && !picking && (
+          <form
+            className="sheet-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              save();
+            }}
+          >
+            <h2 id="sheet-title">{draft.isNew ? (draft.kind === 'visit' ? 'Time on campus' : 'New class') : draft.course || 'Time on campus'}</h2>
+
+            <label className="field">
+              <span>{draft.kind === 'visit' ? 'What for (optional)' : 'Class'}</span>
+              <input value={draft.course} maxLength={60} placeholder={draft.kind === 'visit' ? 'Library' : 'CSE 240'} onChange={(e) => edit({ course: e.target.value })} />
+            </label>
+
+            <div className="field">
+              <span>Days</span>
+              <DayPicker label="Days" days={draft.days} onChange={(days) => edit({ days })} />
+            </div>
+
+            <div className="pair">
+              <label className="field">
+                <span>{draft.kind === 'visit' ? 'Be there by' : 'Starts'}</span>
+                <input type="time" value={minuteToInput(draft.startMin)} onChange={(e) => e.target.value && edit({ startMin: inputToMinute(e.target.value) })} />
+              </label>
+              <label className="field">
+                <span>{draft.kind === 'visit' ? 'Head back at' : 'Ends'}</span>
+                <input type="time" value={minuteToInput(draft.endMin)} onChange={(e) => e.target.value && edit({ endMin: inputToMinute(e.target.value) })} />
+              </label>
+            </div>
+
+            <div className="field">
+              <span>Building</span>
+              <button type="button" className="button select" onClick={() => setPicking(true)}>
+                {draftPlaceName || 'Choose a building'}
+              </button>
+            </div>
+
+            {draft.kind !== 'visit' && (
+              <label className="field">
+                <span>Room (optional)</span>
+                <input value={draft.room ?? ''} maxLength={20} placeholder="210" onChange={(e) => edit({ room: e.target.value || undefined })} />
+              </label>
+            )}
+
+            {estimate !== null && (
+              <div className="setting">
+                <span>
+                  Walk from the Gammage stop
+                  <small>{draft.walkMin === null ? 'Our estimate. Correct it once you’ve walked it.' : 'Your own time.'}</small>
+                </span>
+                <Stepper label="Walk from the Gammage stop" value={draft.walkMin ?? estimate} unit="min" min={1} max={40} onChange={(walkMin) => edit({ walkMin })} />
+              </div>
+            )}
+
+            <label className="field">
+              <span>Last day it meets (optional)</span>
+              <input type="date" value={draft.until ?? ''} onChange={(e) => edit({ until: e.target.value || undefined })} />
+            </label>
+
+            {message && (
+              <p className="error" role="alert">
+                {message}
+              </p>
+            )}
+
+            <div className="sheet-actions">
+              {!draft.isNew && (
+                <button type="button" className="button danger" disabled={saving} onClick={() => commit(schedule!.classes.filter((c) => c.id !== draft.id), null, null)}>
+                  Delete
+                </button>
+              )}
+              <button type="button" className="button quiet" onClick={() => setDraft(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="button primary" disabled={saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        )}
+      </dialog>
     </main>
   );
 }

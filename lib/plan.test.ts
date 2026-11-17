@@ -28,27 +28,15 @@ const schedule: Schedule = {
     { id: 'a', name: 'Brickyard', lat: 33.4236, lng: -111.9397 },
     { id: 'b', name: 'Coor Hall', lat: 33.4195, lng: -111.9369 },
   ],
-  patterns: [
-    {
-      id: 'mw',
-      name: 'MW',
-      days: [1, 3],
-      classes: [
-        { id: 'c1', course: 'CSE 205', placeId: 'a', room: '210', startMin: 9 * 60, endMin: 10 * 60 + 15 },
-        { id: 'c2', course: 'MAT 267', placeId: 'b', startMin: 10 * 60 + 30, endMin: 11 * 60 + 45 },
-      ],
-    },
-    { id: 'tth', name: 'TTh', days: [2, 4], classes: [{ id: 'c3', course: 'ENG 102', placeId: 'b', startMin: 13 * 60 + 30, endMin: 14 * 60 + 45 }] },
+  classes: [
+    { id: 'c1', course: 'CSE 205', placeId: 'a', room: '210', startMin: 9 * 60, endMin: 10 * 60 + 15, days: [1, 3] },
+    { id: 'c2', course: 'PHY 121', placeId: 'b', startMin: 10 * 60 + 30, endMin: 11 * 60 + 45, days: [1, 3] },
+    { id: 'c3', course: 'ENG 102', placeId: 'b', startMin: 13 * 60 + 30, endMin: 14 * 60 + 45, days: [2, 4] },
   ],
-  gym: { days: [1, 2, 3, 5, 6], workoutMin: 75, afterClass: 'gym', evening: 'walk', eveningLeaveMin: 17 * 60 },
   walkOverrides: {
     'a|gammage': 8,
     'b|gammage': 7,
     'a|b': 6,
-    'a|gym': 12,
-    'b|gym': 10,
-    'gammage|gym': 9,
-    'gym|sol': 45,
     'a|sol': 52,
     'b|sol': 50,
   },
@@ -121,14 +109,6 @@ describe('getting to class', () => {
     assert.equal(out.warn, 'Tight for CSE 205: in the room around 8:56 AM.');
   });
 
-  it('never plans the evening gym trip before you could be home', () => {
-    // No bus time for the ride home yet, so home is "not before" class end plus the trip.
-    const late = { ...schedule, gym: { ...schedule.gym, eveningLeaveMin: 11 * 60 } };
-    const p = planDay({ now: T(8), schedule: { ...late, override: { date: DATES[0], skipped: [], afterClass: 'home' } }, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: null, timetable: null, progress: null });
-    // Class ends 11:45, 7 min to Gammage, 15 min ride, 5 min walk home.
-    assert.equal(clock(leg(p, 'walk-out').start), '12:12 PM');
-  });
-
   it('gives no bus time for a class hours away, only when it can firm up', () => {
     const p = plan(T(8, 0, 1), live(10), { day: 1 });
     const out = leg(p, 'out');
@@ -148,12 +128,12 @@ describe('getting to class', () => {
   });
 
   it('stops planning classes after their last day', () => {
-    const ended = { ...schedule, patterns: schedule.patterns.map((p) => ({ ...p, until: '2026-11-08' })) };
+    const ended = { ...schedule, classes: schedule.classes.map((c) => ({ ...c, until: '2026-11-08' })) };
     const p = planDay({ now: T(8), schedule: ended, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: live(10), timetable: null, progress: null });
     assert.equal(p.classCount, 0);
-    // Still a gym day, so the evening trip remains.
-    assert.deepEqual(ids(p), ['walk-out', 'gym', 'walk-back']);
-    const lastDay = { ...schedule, patterns: schedule.patterns.map((p) => ({ ...p, until: '2026-11-09' })) };
+    assert.deepEqual(ids(p), []);
+    assert.equal(p.alertWindow, null);
+    const lastDay = { ...schedule, classes: schedule.classes.map((c) => ({ ...c, until: '2026-11-09' })) };
     assert.equal(planDay({ now: T(8), schedule: lastDay, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: live(10), timetable: null, progress: null }).classCount, 2);
   });
 
@@ -165,73 +145,92 @@ describe('getting to class', () => {
 });
 
 describe('after class', () => {
-  it('goes to the gym, then the first bus reachable after the workout', () => {
-    // Class ends 11:45, 10 min to the gym, 75 min workout: done 1:10 PM, at Gammage by 1:19.
-    const p = plan(T(11, 50), live(25));
-    assert.deepEqual(ids(p).slice(-3), ['walk-gym', 'gym', 'back']);
-    assert.equal(clock(leg(p, 'gym').end), '1:10 PM');
-    const back = leg(p, 'back');
-    assert.ok(back.start! >= T(13, 10));
-    assert.equal(back.bus!.stopId, 'gammage');
-    assert.equal(back.walkMin, 9);
-  });
-
-  it('heads straight home when that is the choice', () => {
+  it('takes the first bus home that can be reached after the last class', () => {
     // Bus reaches Gammage 11:55. Leave Coor Hall at 11:46 for a 7 min walk and 2 spare.
-    const p = plan(T(11, 40), live(30), { ov: { afterClass: 'home' } });
+    const p = plan(T(11, 40), live(30));
     const back = leg(p, 'back');
     assert.equal(clock(back.bus!.at), '11:55 AM');
     assert.equal(clock(back.start), '11:46 AM');
     assert.equal(clock(back.end), '12:15 PM');
-    assert.ok(!ids(p).includes('walk-gym'));
-  });
-
-  it('adds the evening gym trip after going home on a gym day', () => {
-    const p = plan(T(11, 40), live(35), { ov: { afterClass: 'home' } });
-    assert.deepEqual(ids(p).slice(-3), ['walk-out', 'gym', 'walk-back']);
-    assert.equal(clock(leg(p, 'walk-out').start), '5:00 PM');
-    assert.equal(leg(p, 'walk-out').walkMin, 45);
-    assert.equal(p.eveningApplies, true);
+    assert.equal(back.bus!.stopId, 'gammage');
+    assert.deepEqual(ids(p).slice(-1), ['back']);
   });
 
   it('plans from the previous class when the last one is skipped', () => {
-    const p = plan(T(9, 30), live(5), { ov: { skipped: ['c2'], afterClass: 'home' } });
+    const p = plan(T(9, 30), live(5), { ov: { skipped: ['c2'] } });
     assert.equal(leg(p, 'class:c2').skipped, true);
     assert.ok(leg(p, 'back').start! >= T(10, 15) - 75_000);
     assert.equal(leg(p, 'back').walkMin, 8);
   });
 
   it('replans from the moment of leaving campus early', () => {
-    const p = plan(T(9, 40), live(14), { ov: { skipped: ['c1', 'c2'], leftAt: T(9, 40), leftPlaceId: 'a', afterClass: 'home' } });
+    const p = plan(T(9, 40), live(14), { ov: { skipped: ['c1', 'c2'], leftAt: T(9, 40), leftPlaceId: 'a' } });
     assert.ok(!ids(p).includes('out'));
     // Bus reaches Gammage 10:14; with an 8 min walk and 2 spare, leave by 10:04.
     assert.equal(clock(leg(p, 'back').start), '10:04 AM');
   });
 
-  it('is just the bus home on a rest day', () => {
+  it('is the class and the bus home once you are there', () => {
     const p = plan(T(14, 30, 3), live(35), { day: 3 });
-    assert.equal(p.gymDay, false);
-    assert.equal(p.afterClass, 'home');
     assert.deepEqual(ids(p), ['class:c3', 'back']);
   });
+});
 
-  it('finishes the workout when told to', () => {
-    const p = plan(T(12, 40), live(25), { ov: { gymDoneAt: T(12, 40) } });
-    assert.equal(clock(leg(p, 'gym').end), '12:40 PM');
-    assert.ok(leg(p, 'back').start! < T(13, 10));
+describe('time on campus that is not a class', () => {
+  // Friday: no classes, but at the library from 10:00 to 1:00.
+  const visit = { id: 'v1', course: 'Library', placeId: 'b', startMin: 10 * 60, endMin: 13 * 60, days: [5], kind: 'visit' as const };
+  const withVisit = (now: number, bus: LiveBus, block = visit) =>
+    planDay({ now, schedule: { ...schedule, classes: [...schedule.classes, block] }, route, prefs: { walkMinutes: 5, bufferMinutes: 2 }, live: bus, timetable: null, progress: null });
+
+  it('gets a bus there and a bus back, like a class', () => {
+    // Friday 9:00. Bus reaches SoL 9:10, Gammage 9:30, 7 min walk: there 9:37 for 9:55.
+    const p = withVisit(T(9, 0, 4), live(10));
+    assert.deepEqual(ids(p), ['out', 'walk-in', 'class:v1', 'back']);
+    assert.equal(leg(p, 'out').goal, 'Library');
+    assert.equal(leg(p, 'class:v1').visit, true);
+    assert.equal(leg(p, 'walk-in').note, 'There about 23 min early.');
+    assert.deepEqual([clock(p.alertWindow!.from), clock(p.alertWindow!.until)], ['8:00 AM', '2:00 PM']);
+  });
+
+  it('needs no walk when it is at the stop itself', () => {
+    const p = withVisit(T(9, 0, 4), live(10), { ...visit, course: '', placeId: 'gammage' });
+    assert.deepEqual(ids(p), ['out', 'class:v1', 'back']);
+    assert.equal(leg(p, 'class:v1').title, 'On campus');
+    assert.equal(leg(p, 'out').goal, 'campus');
+  });
+
+  it('counts whatever ends last as the end of the day', () => {
+    // Monday, staying on at Coor Hall until 4:00 after the two classes.
+    const p = withVisit(T(8), live(10), { ...visit, days: [1], startMin: 12 * 60, endMin: 16 * 60 });
+    assert.equal(clock(p.alertWindow!.until), '5:00 PM');
+    assert.equal(leg(p, 'back').freeAt, T(16));
+  });
+});
+
+describe('alert hours each person sets', () => {
+  const prefs = { walkMinutes: 5, bufferMinutes: 2, alertsBeforeMin: 45, alertsAfterMin: 150 };
+
+  it('moves the window', () => {
+    const window = plan(T(8), live(10), { prefs }).alertWindow!;
+    assert.deepEqual([clock(window.from), clock(window.until)], ['8:15 AM', '2:15 PM']);
+  });
+
+  it('keeps announcing buses home for as long as the window stays open', () => {
+    assert.ok(plan(T(13, 30), live(20), { prefs }).homeWatch);
+    assert.equal(plan(T(14, 20), live(20), { prefs }).homeWatch, null);
   });
 });
 
 describe('service limits', () => {
   const ends7pm = timetable({ lastSec: 19 * 3600 });
 
-  it('sends you home on foot when the workout ends after the last bus', () => {
-    const p = plan(T(17, 30, 4), live(5), { day: 4, ov: { evening: 'bus', eveningLeaveMin: 17 * 60 + 30 }, timetable: { ...ends7pm, weekday: 5 } });
-    assert.equal(leg(p, 'out2').kind, 'bus');
-    const back = leg(p, 'back2');
+  it('sends you home on foot when class ends after the last bus', () => {
+    // Thursday 2:50 PM, class over at 2:45, and the bus parks at 3:00.
+    const p = plan(T(14, 50, 3), live(25), { day: 3, timetable: timetable({ weekday: 4, lastSec: 15 * 3600 }) });
+    const back = leg(p, 'back');
     assert.equal(back.kind, 'walk');
     assert.equal(back.title, 'Walk home');
-    assert.match(back.warn!, /bus finishes around 7:00 PM/);
+    assert.match(back.warn!, /bus finishes around 3:00 PM/);
   });
 
   it('marks the last bus home', () => {
@@ -244,16 +243,16 @@ describe('service limits', () => {
   });
 
   it('walks both ways on a day the bus does not run', () => {
-    const p = plan(T(16, 0, 5), null, { day: 5, ov: { evening: 'bus' }, timetable: timetable({ weekday: 6, runs: false }) });
-    assert.deepEqual(ids(p), ['out2', 'gym', 'back2']);
-    assert.equal(leg(p, 'out2').kind, 'walk');
-    assert.match(leg(p, 'out2').warn!, /No bus on Saturdays/);
-    assert.equal(leg(p, 'back2').kind, 'walk');
-    assert.match(p.service!, /No bus on Saturdays/);
+    const p = plan(T(7), null, { timetable: timetable({ weekday: 1, runs: false }) });
+    assert.deepEqual(ids(p), ['out', 'class:c1', 'class:c2', 'back']);
+    assert.equal(leg(p, 'out').kind, 'walk');
+    assert.match(leg(p, 'out').warn!, /No bus on Mondays/);
+    assert.equal(leg(p, 'back').kind, 'walk');
+    assert.match(p.service!, /No bus on Mondays/);
   });
 
-  it('has nothing to plan when the gym is skipped on a day without classes', () => {
-    assert.deepEqual(ids(plan(T(10, 0, 4), live(5), { day: 4, ov: { evening: 'skip' } })), []);
+  it('has nothing to plan on a day without classes', () => {
+    assert.deepEqual(ids(plan(T(10, 0, 4), live(5), { day: 4 })), []);
   });
 
   it('trusts no time from a bus that is parked up or silent', () => {
@@ -322,7 +321,7 @@ describe('planAnswer', () => {
     const a = planAnswer(plan(T(9, 30), live(5)), route, T(9, 30))!;
     assert.equal(a.lead, 'In CSE 205 until');
     assert.equal(a.headline, '10:15 AM');
-    assert.match(a.detail, /Then MAT 267 at 10:30 AM/);
+    assert.match(a.detail, /Then PHY 121 at 10:30 AM/);
   });
 
   it('gives a not-before time when the bus is too far off to know', () => {
@@ -365,7 +364,7 @@ describe('the ride home, class by class', () => {
   });
 
   it('says nothing for a bus you could not leave for before the next class', () => {
-    // Bus reaches Gammage 10:49: leaving at 10:39 is after MAT 267 starts.
+    // Bus reaches Gammage 10:49: leaving at 10:39 is after PHY 121 starts.
     const p = plan(T(10, 16), live(13));
     assert.equal(p.homeWatch!.next, null);
     assert.deepEqual(busHomeAlerts(p, T(10, 16), []), []);
@@ -375,14 +374,14 @@ describe('the ride home, class by class', () => {
     assert.equal(plan(T(10, 31), live(5)).homeWatch, null);
     assert.equal(plan(T(11, 29), live(5)).homeWatch, null);
     const watch = plan(T(11, 30), live(15)).homeWatch!;
-    assert.deepEqual([watch.course, watch.place, watch.walkMin, watch.until], ['MAT 267', 'Coor Hall', 7, null]);
+    assert.deepEqual([watch.course, watch.place, watch.walkMin, watch.until], ['PHY 121', 'Coor Hall', 7, null]);
   });
 
-  it('after the last class announces every bus until told otherwise, without assuming the gym', () => {
-    // Gym is the plan after class, but nobody has said they went. Buses reach Gammage 11:55, 12:30, 1:05.
+  it('after the last class announces every bus until told otherwise', () => {
+    // Nobody has said they left. Buses reach Gammage 11:55, 12:30, 1:05.
     const first = plan(T(11, 31), live(4));
     const a = busHomeAlerts(first, T(11, 31), []);
-    assert.equal(a[0].title, 'After MAT 267: bus home 11:55 AM');
+    assert.equal(a[0].title, 'After PHY 121: bus home 11:55 AM');
     let fired = keys(first, a);
 
     // 11:50: that bus can no longer be reached, and the 12:30 isn't close yet.
@@ -393,7 +392,7 @@ describe('the ride home, class by class', () => {
     // 12:12: ten minutes before the moment to leave for the 12:30.
     const second = plan(T(12, 12), live(33));
     const b = busHomeAlerts(second, T(12, 12), fired);
-    assert.equal(b[0].title, 'After MAT 267: bus home 12:30 PM');
+    assert.equal(b[0].title, 'After PHY 121: bus home 12:30 PM');
     fired = [...fired, ...keys(second, b)];
     assert.deepEqual(busHomeAlerts(plan(T(12, 14), live(31)), T(12, 14), fired), []);
 
@@ -407,22 +406,20 @@ describe('the ride home, class by class', () => {
   });
 
   it('never takes the ride home as caught on its own', () => {
-    const p = plan(T(11, 47), live(23), { ov: { afterClass: 'home' } });
+    const p = plan(T(11, 47), live(23));
     assert.ok(leg(p, 'back').start! <= T(11, 47));
     assert.deepEqual(advanceProgress(null, p, T(11, 47)).committed, []);
   });
 
-  it('stops when you say you are on the bus, and plans the evening from getting home', () => {
+  it('stops when you say you are on the bus', () => {
     const p = plan(T(12, 0), live(20), { ov: { onBusAt: T(11, 56) } });
     assert.equal(p.homeWatch, null);
-    assert.ok(!ids(p).includes('back') && !ids(p).includes('walk-gym'));
-    // On the bus 11:56, 15 min ride, 5 min walk: home 12:16. Gym day, so the evening trip remains.
-    assert.deepEqual(ids(p).slice(-3), ['walk-out', 'gym', 'walk-back']);
+    assert.deepEqual(ids(p), ['class:c1', 'class:c2']);
     assert.deepEqual(busHomeAlerts(p, T(12, 0), []), []);
   });
 
   it('stops when you say you are home', () => {
-    const p = plan(T(12, 30), live(20), { ov: { homeAt: T(12, 30), evening: 'skip' } });
+    const p = plan(T(12, 30), live(20), { ov: { homeAt: T(12, 30) } });
     assert.equal(p.homeWatch, null);
     assert.deepEqual(ids(p), ['class:c1', 'class:c2']);
   });
@@ -435,12 +432,12 @@ describe('the ride home, class by class', () => {
 
 describe('getting out early and heading home', () => {
   it('ends a class when it actually let out, and watches the ride home from then', () => {
-    // MAT 267 lets out at 11:20 instead of 11:45. Bus reaches Gammage 11:35.
+    // PHY 121 lets out at 11:20 instead of 11:45. Bus reaches Gammage 11:35.
     const now = T(11, 21);
     const p = plan(now, live(29), { ov: { outEarly: { c2: T(11, 20) } } });
     assert.equal(clock(leg(p, 'class:c2').end), '11:20 AM');
     assert.equal(p.homeWatch!.freeAt, T(11, 20));
-    assert.equal(busHomeAlerts(p, now, [])[0].title, 'After MAT 267: bus home 11:35 AM');
+    assert.equal(busHomeAlerts(p, now, [])[0].title, 'After PHY 121: bus home 11:35 AM');
   });
 
   it('ignores an early finish that is not inside the class', () => {
@@ -449,14 +446,14 @@ describe('getting out early and heading home', () => {
   });
 
   it('goes home after the current class when the later ones are dropped', () => {
-    // In CSE 205, deciding to go home after it: MAT 267 is skipped, so CSE 205 is now the last class.
-    const p = plan(T(10, 5), live(5), { ov: { skipped: ['c2'], afterClass: 'home' } });
+    // In CSE 205, deciding to go home after it: PHY 121 is skipped, so CSE 205 is now the last class.
+    const p = plan(T(10, 5), live(5), { ov: { skipped: ['c2'] } });
     assert.equal(leg(p, 'back').freeAt, T(10, 15));
     assert.deepEqual([p.homeWatch!.course, p.homeWatch!.until], ['CSE 205', null]);
   });
 
   it('watches from where you left when leaving campus by hand', () => {
-    const p = plan(T(9, 40), live(14), { ov: { skipped: ['c1', 'c2'], leftAt: T(9, 40), leftPlaceId: 'a', afterClass: 'home' } });
+    const p = plan(T(9, 40), live(14), { ov: { skipped: ['c1', 'c2'], leftAt: T(9, 40), leftPlaceId: 'a' } });
     assert.deepEqual([p.homeWatch!.course, p.homeWatch!.place, p.homeWatch!.walkMin], [null, 'Brickyard', 8]);
     assert.match(busHomeAlerts(p, T(9, 55), [])[0].title, /^From campus: bus home 10:14 AM/);
   });
@@ -495,7 +492,7 @@ describe('alerts only around time on campus', () => {
     assert.equal(kinds(T(12, 45)).length, 5);
   });
 
-  it('is silent before and after, including the first bus of the morning and the evening gym trip', () => {
+  it('is silent before and after, including the first bus of the morning', () => {
     assert.deepEqual(kinds(T(6, 59)), []);
     assert.deepEqual(kinds(T(12, 46)), []);
     assert.deepEqual(kinds(T(17, 0)), []);

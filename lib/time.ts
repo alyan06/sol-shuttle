@@ -45,6 +45,12 @@ export function inputToMinute(value: string): number {
   return hours * 60 + minutes;
 }
 
+/** Minutes after midnight as a clock time, like "3:00 PM". */
+export function formatMinute(minute: number): string {
+  const hour = Math.floor(minute / 60);
+  return `${hour % 12 === 0 ? 12 : hour % 12}:${String(minute % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
 export function formatClock(ms: number): string {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Phoenix',
