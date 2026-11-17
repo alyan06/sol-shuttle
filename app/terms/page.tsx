@@ -12,7 +12,7 @@ export default function TermsPage() {
       <TopBar />
       <header className="page-head">
         <h1>Terms</h1>
-        <p>The short rules for using SoL Shuttle. Last updated {UPDATED}.</p>
+        <p>The short rules for using SoL Shuttle (solshuttle.app). Last updated {UPDATED}.</p>
       </header>
       <article className="prose">
         <h2>What this is</h2>

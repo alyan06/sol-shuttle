@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       <TopBar />
       <header className="page-head">
         <h1>Privacy</h1>
-        <p>What this app keeps about you, why, and how to erase it. Last updated {UPDATED}.</p>
+        <p>What SoL Shuttle (solshuttle.app) keeps about you, why, and how to erase it. Last updated {UPDATED}.</p>
       </header>
       <article className="prose">
         <h2>Who runs this</h2>
@@ -41,6 +41,11 @@ export default function PrivacyPage() {
           </li>
         </ul>
 
+        <h2>What your Google details are used for</h2>
+        <p>
+          Your name and email from Google are used for two things only: to know which account is yours when you sign in, and to show them back to you in Settings. They are not used for advertising, not sold, not shared with anyone, and not used to send you email.
+        </p>
+
         <h2>What it never collects</h2>
         <ul>
           <li>Your location. The app never asks for it. Where you are is worked out from your schedule alone.</li>
@@ -56,7 +61,7 @@ export default function PrivacyPage() {
 
         <h2>Where it lives</h2>
         <p>
-          The app is hosted by Vercel in the United States. The database is hosted by Supabase, for now in its Mumbai, India region, because it shares a project that was set up there. Alerts travel through your phone maker&apos;s notification service (Apple, Google or Mozilla). They are encrypted on the way, so that service can deliver an alert but can&apos;t read it.
+          The app is hosted by Vercel and the database by Supabase, both in the United States. Alerts travel through your phone maker&apos;s notification service (Apple, Google or Mozilla). They are encrypted on the way, so that service can deliver an alert but can&apos;t read it.
         </p>
 
         <h2>How long, and how to erase it</h2>
@@ -78,7 +83,7 @@ export default function PrivacyPage() {
           ) : (
             <>Open an issue on the GitHub page above.</>
           )}{' '}
-          The date at the top changes whenever this page does.
+          The date at the top changes whenever this page does. The rules for using the app are on the <Link href="/terms">terms page</Link>.
         </p>
         <p>
           <Link href="/">Back to the bus</Link>

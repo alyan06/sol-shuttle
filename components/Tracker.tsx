@@ -333,6 +333,9 @@ export default function Tracker({ route }: { route: Route }) {
               : `Times are estimates learned from the bus itself. ${plan?.service ?? ''}`}
           </p>
         )}
+        <p className="note fine">
+          <Link href="/privacy">Privacy</Link> · <Link href="/terms">Terms</Link>. An independent project by a SoL resident, not run by SoL, ASU or Samsara.
+        </p>
       </div>
     </main>
   );

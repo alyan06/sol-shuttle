@@ -71,7 +71,7 @@ npm run tick:local  # runs the alert check every 30s against the dev server (nee
 
 - Never commit anyone's class schedule or personal times. The repo is public; they belong in that person's row. (`lib/buildings.json` is ASU's public list of every Tempe building and is fine.)
 - Never return or log what an alert says, or anyone's schedule, from the tick: pg_net keeps the replies for a while, and alert text names people's classes. The tick reports alert kinds and a head count only.
-- Don't add analytics, tracking or location. The privacy page (`app/privacy/page.tsx`) promises there is none; if what's collected ever changes, that page changes in the same commit.
+- Don't add analytics, tracking or location. The privacy page (`app/privacy/page.tsx`) promises there is none; if what's collected, where it's hosted or who it's shared with ever changes, that page and `app/terms/page.tsx` change in the same commit, with their dates. Both are linked from the home page for everyone and are the links given to Google: https://solshuttle.app/privacy and https://solshuttle.app/terms.
 - Never put the Samsara share token in a tracked file. Scripts read it from `.env.local`.
 - A plan time is only as good as its source. Keep `source` and `plusMinus` honest, pick the earlier bus when unsure, and say "no time yet" rather than guess hours ahead.
 - Never request the driver's name or any driver field. Position fields only.
