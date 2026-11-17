@@ -13,7 +13,8 @@ export const metadata: Metadata = {
   title: { default: 'SoL Shuttle', template: '%s · SoL Shuttle' },
   description: 'When to leave for the SoL Tempe shuttle, planned around your classes.',
   appleWebApp: { capable: true, title: 'Shuttle', statusBarStyle: 'default' },
-  icons: { apple: '/apple-touch-icon.png', icon: '/icon-192.png' },
+  // The ?v= makes browsers fetch the new logo instead of a copy of the old one they kept.
+  icons: { apple: '/apple-touch-icon.png?v=2', icon: '/icon-192.png?v=2' },
   robots: { index: false, follow: false },
 };
 

@@ -43,7 +43,7 @@ const TABS = [
 /** The logo, small. Drawn by scripts/make-icons.mjs, so the app, its icon and its sign-in screen all show the same thing. */
 export function Mark() {
   // eslint-disable-next-line @next/next/no-img-element
-  return <img className="mark" src="/logo-120.png" alt="" width={30} height={30} />;
+  return <img className="mark" src="/logo-120.png?v=2" alt="" width={30} height={30} />;
 }
 
 export function TopBar({ title = 'SoL Shuttle', children }: { title?: string; children?: ReactNode }) {
