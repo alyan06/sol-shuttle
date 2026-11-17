@@ -68,7 +68,7 @@ type Input = {
 export function evaluate({ snapshot, route, prefs, state, watching }: Input): { events: AlertEvent[]; state: AlertState } {
   const { now, ping, status, etas } = snapshot;
   const events: AlertEvent[] = [];
-  const next: AlertState = { ...state, prevS: snapshot.located?.s ?? state.prevS };
+  const next: AlertState = { ...state, prevS: snapshot.located?.s ?? state.prevS, course: snapshot.course ?? state.course ?? null };
 
   const seenFresh = ping !== null && status !== 'offline';
   const moving = seenFresh && ping.mph >= MOVING_MPH;

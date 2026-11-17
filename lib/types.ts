@@ -42,12 +42,19 @@ export type StopEta = {
   rough?: true;
 };
 
+/**
+ * Which way the bus was last seen driving, and where. A stopped bus reports no heading, so this
+ * is what says which side of the road it's waiting on.
+ */
+export type Course = { heading: number; at: number; lat: number; lng: number };
+
 export type Snapshot = {
   now: number;
   status: FeedStatus;
   ping: Ping | null;
   located: Located | null;
   etas: StopEta[];
+  course?: Course | null;
 };
 
 export type AlertPrefs = {
@@ -81,6 +88,7 @@ export type AlertState = {
   /** Observed end of service per weekday, minutes after midnight. Newest last. */
   serviceEnds: Record<string, number[]>;
   prevS: number | null;
+  course?: Course | null;
 };
 
 export type AlertKind =

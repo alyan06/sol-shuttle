@@ -132,8 +132,54 @@ describe('roughEtas', () => {
     assert.deepEqual(etas.find((e) => e.stopId === 'home'), { stopId: 'home', seconds: 0, atStop: true, rough: true });
   });
 
+  it('gives no time for a bus driving away from the stop it would be due at', () => {
+    // Seen live: it left home the back way for a break, and was shown as arriving in under a minute.
+    const east300 = E + 300 / (111_320 * Math.cos((N * Math.PI) / 180));
+    assert.deepEqual(roughEtas(loop, at(N, east300, 90, 25), 2700), []);
+    // Coming back the same way, or only crawling about near the stop, it still gets a time.
+    assert.ok(Math.abs(roughEtas(loop, at(N, east300, 270, 25), 2700).find((e) => e.stopId === 'home')!.seconds - 300 / (6.25 * 1.25)) < 2);
+    assert.equal(roughEtas(loop, at(N, east300, 90, 5), 2700).length, 2);
+    // Further out, heading away for a block is just how the streets go.
+    assert.equal(roughEtas(loop, at(midLat, E, 90, 25), 300).length, 2);
+  });
+
+  it('stopped with no memory of the loop, goes by the way it was last driving', () => {
+    const east = roughEtas(loop, at(midLat, midLng, 0, 0), null, 90);
+    assert.ok(east.find((e) => e.stopId === 'home')!.seconds < east.find((e) => e.stopId === 'west')!.seconds);
+    const west2 = roughEtas(loop, at(midLat, midLng, 0, 0), null, 270);
+    assert.ok(west2.find((e) => e.stopId === 'west')!.seconds < west2.find((e) => e.stopId === 'home')!.seconds);
+  });
+
   it('gives no time for a bus that has left the area altogether', () => {
     assert.deepEqual(roughEtas(loop, at(N + 0.02, E, 0), 1300), []);
     assert.deepEqual(roughEtas(loop, at(N, E + 0.02, 90), 1300), []);
+  });
+});
+
+describe('locate, stopped', () => {
+  // A stopped bus reports heading 0 whatever way it faces.
+  const stopped = (lng: number) => ping(lng, 0, 0);
+
+  it('uses the way the bus was last driving to pick the side of the road', () => {
+    assert.ok(Math.abs(locate(route, stopped(MIDDLE), null, 90)!.s - HALF / 2) < 5);
+    assert.ok(Math.abs(locate(route, stopped(MIDDLE), null, 270)!.s - HALF * 1.5) < 5);
+  });
+
+  it('believes that over continuity, so a bus back from a detour is not sent round again', () => {
+    // Seen live: left the loop early, came back along another street, and stopped at a light on the
+    // return leg. Continuity alone put it on the outbound side, 20 minutes from a stop 2 minutes away.
+    assert.ok(Math.abs(locate(route, stopped(MIDDLE), 100)!.s - HALF / 2) < 5);
+    assert.ok(Math.abs(locate(route, stopped(MIDDLE), 100, 270)!.s - HALF * 1.5) < 5);
+  });
+
+  it('is off the route when only the wrong side of the road is in reach', () => {
+    const oneWay: Route = { ...route, path: route.path.slice(0, 2) };
+    assert.equal(locate(oneWay, stopped(MIDDLE), null, 270), null);
+    assert.notEqual(locate(oneWay, stopped(MIDDLE), null, null), null);
+  });
+
+  it('does not mind which way it faces at a stop, where it turns and pulls in as it likes', () => {
+    const nearB = EAST - 0.0002; // about 20 m short of stop B
+    assert.ok(Math.abs(locate(route, stopped(nearB), HALF - 30, 270)!.s - (HALF - 18.5)) < 5);
   });
 });

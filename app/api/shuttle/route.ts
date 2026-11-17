@@ -5,11 +5,12 @@ import { fetchPings } from '@/lib/samsara.ts';
 import { buildSnapshot } from '@/lib/snapshot.ts';
 import { load } from '@/lib/store.ts';
 import { route } from '@/lib/tick.ts';
-import type { Ping, Progress, Schedule, Snapshot, Timetable } from '@/lib/types.ts';
+import type { Course, Ping, Progress, Schedule, Snapshot, Timetable } from '@/lib/types.ts';
 
 export const dynamic = 'force-dynamic';
 
 let prevS: number | null = null;
+let course: Course | null = null;
 
 /** The owner's day: only sent with the passcode. The bus position itself is public. */
 export type PrivateDay = { schedule: Schedule; timetable: Timetable; progress: Progress | null };
@@ -32,11 +33,15 @@ export async function GET(request: Request) {
     feedError = true;
   }
 
-  const snapshot = buildSnapshot(route, pings, now, prevS);
+  // The alert tick sees the bus every 30 seconds whether or not this page is open, so its memory
+  // of which way the bus was driving is used when it's newer than this server's own.
+  const tracking = await load('tracking');
+  const remembered = tracking.course && (!course || tracking.course.at > course.at) ? tracking.course : course;
+  const snapshot = buildSnapshot(route, pings, now, prevS, remembered);
   prevS = snapshot.located?.s ?? prevS;
+  course = snapshot.course ?? course;
 
   // With no fresh ping, the last position the alert tick stored still tells the app where the bus was.
-  const tracking = await load('tracking');
   const lastSeen = snapshot.ping ?? tracking.lastPing;
 
   let day: PrivateDay | null = null;

@@ -21,7 +21,7 @@ const FOLLOW_AFTER_MS = 10 * MIN;
 /** One background check: read the feed, log the bus, run the plan and alert rules, push anything new. */
 export async function runTick(now = Date.now()): Promise<{ status: string; sent: AlertEvent[] }> {
   const [pings, settings, tracking, schedule] = await Promise.all([fetchPings(), load('settings'), load('tracking'), load('schedule')]);
-  const snapshot = buildSnapshot(route, pings, now, tracking.prevS);
+  const snapshot = buildSnapshot(route, pings, now, tracking.prevS, tracking.course ?? null);
   const date = tempeDayKey(now);
   const events: AlertEvent[] = [];
 
