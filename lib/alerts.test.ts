@@ -88,8 +88,10 @@ describe('at my stop', () => {
 });
 
 describe('not running', () => {
-  it('alerts after 20 still minutes during service, then says when it recovers', () => {
-    const a = run({ ...inService, lastMovedAt: T0 - 21 * MIN }, snap(T0, 900, { mph: 0 }));
+  it('alerts after an hour still during service, then says when it recovers', () => {
+    // Half an hour still is a break, not an outage.
+    assert.deepEqual(kinds(run({ ...inService, lastMovedAt: T0 - 30 * MIN }, snap(T0, 900, { mph: 0 }))), []);
+    const a = run({ ...inService, lastMovedAt: T0 - 61 * MIN }, snap(T0, 900, { mph: 0 }));
     assert.deepEqual(kinds(a), ['not-running']);
     const b = run(a.state, snap(T0 + MIN, 900, { mph: 0 }));
     assert.deepEqual(kinds(b), []);

@@ -188,3 +188,57 @@ describe('typicalLoop', () => {
     assert.equal(typicalLoop([day(every(30, 4))]), null);
   });
 });
+
+describe('breaks in the log', async () => {
+  const { breaksOf, usualBreaks, breakPlace } = await import('./breaks.ts');
+  const loop: Route = {
+    generatedAt: null,
+    loopsObserved: 1,
+    loopSeconds: 2100,
+    path: [],
+    stops: [
+      { id: 'sol', name: 'SoL', lat: 33.42134, lng: -111.90222, s: 0, t: 0, dwellSeconds: 500 },
+      { id: 'gammage', name: 'Gammage', lat: 33.41715, lng: -111.93655, s: 0, t: 0, dwellSeconds: 80 },
+    ],
+  };
+  const DAY = Date.UTC(2026, 10, 17, 7); // midnight in Tempe
+  const at = (sec: number, lat: number, lng: number, mph: number): Snapshot => ({
+    now: DAY + sec * 1000 + 5000,
+    status: 'live',
+    ping: { time: DAY + sec * 1000, lat, lng, heading: 90, mph, address: '' },
+    located: null,
+    etas: [],
+  });
+
+  it('logs standing still 10 minutes in the middle of the day as a break, with where', () => {
+    let day = recordObservation(null, at(12 * 3600 + 57 * 60, 33.42, -111.92, 20), loop).today;
+    // Moving at 12:58, parked east of SoL from 12:59, moving again at 1:40.
+    day = recordObservation(day, at(12 * 3600 + 58 * 60, 33.4224, -111.897, 20), loop).today;
+    day = recordObservation(day, at(12 * 3600 + 59 * 60, 33.4224, -111.8943, 0), loop).today;
+    day = recordObservation(day, at(13 * 3600 + 20 * 60, 33.4224, -111.8943, 0), loop).today;
+    day = recordObservation(day, at(13 * 3600 + 40 * 60, 33.4224, -111.8944, 15), loop).today;
+    assert.deepEqual(day.breaks, [{ from: 12 * 3600 + 58 * 60, to: 13 * 3600 + 40 * 60, place: 'east' }]);
+    // A few minutes at a light is not a break.
+    day = recordObservation(day, at(13 * 3600 + 44 * 60, 33.42, -111.91, 0), loop).today;
+    day = recordObservation(day, at(13 * 3600 + 47 * 60, 33.42, -111.91, 20), loop).today;
+    assert.equal(day.breaks!.length, 1);
+  });
+
+  it('names the places the bus stops for breaks', () => {
+    assert.equal(breakPlace({ lat: 33.4214, lng: -111.9024 }, loop), 'sol');
+    assert.equal(breakPlace({ lat: 33.4224, lng: -111.8943 }, loop), 'east');
+    assert.equal(breakPlace({ lat: 33.4172, lng: -111.9366 }, loop), 'gammage');
+    assert.equal(breakPlace({ lat: 33.40, lng: -111.95 }, loop), 'elsewhere');
+  });
+
+  it('finds breaks in days logged before breaks were recorded, from long waits at a stop', () => {
+    const old = { day: '2026-11-16', weekday: 1, firstMove: 25000, lastMove: 68000, visits: [{ stop: 'sol', arr: 46680, dep: 47900 }, { stop: 'sol', arr: 50000, dep: 50300 }] };
+    assert.deepEqual(breaksOf(old), [{ from: 46680, to: 47900, place: 'sol' }]);
+  });
+
+  it('learns a break that comes back on most days of a weekday', () => {
+    const day = (start: number, end: number) => ({ day: 'x', weekday: 1, firstMove: 25000, lastMove: 68000, visits: [], breaks: [{ from: start, to: end, place: 'sol' as const }] });
+    assert.deepEqual(usualBreaks([day(46800, 49200), day(47400, 49800), day(46500, 48900)]), [{ from: 46800, to: 49200 }]);
+    assert.deepEqual(usualBreaks([day(46800, 49200)]), []);
+  });
+});

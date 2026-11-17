@@ -40,6 +40,7 @@ const GIVE_UP_MS = 3 * 60 * MIN;
 const NOTE_LATER = 'The bus time shows up about an hour before.';
 /** The leg is due but the bus isn't reporting, so "later" would be the wrong thing to say. */
 const NOTE_SILENT = 'No live bus time right now. Check the map before you set off.';
+const NOTE_BREAK = 'The bus is probably on the driver’s break, so there’s no live time. It comes back when the bus moves.';
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export type LiveBus = { status: FeedStatus; etas: StopEta[]; parked: boolean } | null;
@@ -87,7 +88,6 @@ export type Leg = {
   freeAt?: number;
   note?: string;
   warn?: string;
-  walkInstead?: { minutes: number; leaveBy: number | null; to: string };
 };
 
 export type DayPlan = {
@@ -176,6 +176,11 @@ export function busTimes(ctx: Pick<Ctx, 'now' | 'route' | 'live' | 'timetable' |
     }
   }
 
+  // A time only guessed from the loop length can't be right if it falls in a break the bus takes most days.
+  const breaks = timetable?.breaks ?? [];
+  const inBreak = (at: number) => breaks.some((window) => at >= midnight + window.from * 1000 && at <= midnight + window.to * 1000);
+  for (let i = times.length - 1; i >= 0; i--) if (times[i].source === 'estimate' && inBreak(times[i].at)) times.splice(i, 1);
+
   const coveredUntil = times.length > 0 ? times.at(-1)!.at + loop / 2 : now;
   for (const slot of slots) {
     const at = midnight + slot.sec * 1000;
@@ -204,10 +209,6 @@ function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number |
   const { now, route, home, campus } = ctx;
   const ride = rideSeconds(route, home, campus) * 1000;
   const walkHome = ctx.prefs.walkMinutes;
-  const walkAll = ctx.walk(HOME, o.walkTo);
-  const walkInstead = { minutes: walkAll, leaveBy: o.walkBy === null ? null : o.walkBy - walkAll * MIN, to: ctx.name(o.walkTo) };
-  // Walking is only worth offering while there's still time to do it.
-  const canWalk = walkInstead.leaveBy === null || walkInstead.leaveBy >= now;
   const base = { id: o.id, kind: 'bus' as const, title: 'Bus to campus', walkMin: walkHome, goal: o.goal };
 
   const done = ctx.boarded[o.id];
@@ -235,14 +236,11 @@ function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number |
 
   if (!pick) {
     const reason = beyondView ? null : noBusReason(ctx, earliest + walkHome * MIN > lastBoard);
-    if (reason) {
-      const start = o.walkBy === null ? o.readyAt : walkInstead.leaveBy!;
-      const leg: Leg = { id: o.id, kind: 'walk', title: `Walk to ${ctx.name(o.walkTo)}`, start, end: start + walkAll * MIN, walkMin: walkAll, warn: reason };
-      return { legs: [leg], arrive: null };
-    }
+    // Nobody walks it, so with no bus the leg just says so, and why.
+    if (reason) return { legs: [{ ...base, start: null, end: null, notBefore: o.walkBy ?? o.readyAt, warn: reason }], arrive: null };
     const notBefore = o.deadline === null ? o.readyAt : o.deadline - ride - walkHome * MIN - loop;
-    const note = notBefore <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
-    return { legs: [{ ...base, start: null, end: null, notBefore, note, ...(canWalk ? { walkInstead } : {}) }], arrive: null };
+    const note = ctx.live?.parked ? NOTE_BREAK : notBefore <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
+    return { legs: [{ ...base, start: null, end: null, notBefore, note }], arrive: null };
   }
 
   const late = o.deadline !== null && pick.arrive + pick.bus.plusMinus * 1000 > o.deadline;
@@ -254,7 +252,7 @@ function outbound(ctx: Ctx, o: { id: string; readyAt: number; deadline: number |
     start: pick.leaveAt,
     end: pick.arrive,
     bus: { ...pick.bus, stopId: HOME, arrive: pick.arrive },
-    ...(late ? { warn: `${verdict}: ${o.visit ? 'there' : 'in the room'} around ${formatClock(inRoom)}.`, ...(canWalk ? { walkInstead } : {}) } : {}),
+    ...(late ? { warn: `${verdict}: ${o.visit ? 'there' : 'in the room'} around ${formatClock(inRoom)}.` } : {}),
   };
   return { legs: [leg], arrive: pick.arrive };
 }
@@ -276,7 +274,6 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number; walk
   const ride = rideSeconds(route, campus, home) * 1000;
   const walkToStop = o.walkToStop ?? ctx.walk(o.from, CAMPUS);
   const walkHome = ctx.prefs.walkMinutes;
-  const walkAll = ctx.walk(o.from, HOME);
   const base = { id: o.id, kind: 'bus' as const, title: 'Bus home', walkMin: walkToStop, goal: 'Home', freeAt: o.readyAt };
 
   const done = ctx.boarded[o.id];
@@ -292,16 +289,11 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number; walk
   const pick = options[0];
 
   if (!pick) {
-    const walkInstead = { minutes: walkAll, leaveBy: null, to: 'home' };
     const reason = noBusReason(ctx, earliest + walkToStop * MIN + ride > lastHome);
-    if (reason) {
-      const start = o.readyAt;
-      const leg: Leg = { id: o.id, kind: 'walk', title: 'Walk home', start, end: start + walkAll * MIN, walkMin: walkAll, warn: reason };
-      return { legs: [leg], arrive: leg.end };
-    }
+    if (reason) return { legs: [{ ...base, start: null, end: null, notBefore: o.readyAt, warn: reason }], arrive: null };
     const atLeast = earliest + walkToStop * MIN + ride + walkHome * MIN;
-    const note = o.readyAt <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
-    return { legs: [{ ...base, start: null, end: null, notBefore: o.readyAt, note, walkInstead }], arrive: null, atLeast };
+    const note = ctx.live?.parked ? NOTE_BREAK : o.readyAt <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
+    return { legs: [{ ...base, start: null, end: null, notBefore: o.readyAt, note }], arrive: null, atLeast };
   }
 
   const end = pick.arrive + walkHome * MIN;
@@ -312,7 +304,6 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number; walk
     end,
     bus: { ...pick.bus, stopId: CAMPUS, arrive: pick.arrive },
     ...(lastBus ? { lastBus: true } : {}),
-    ...(earliest + walkAll * MIN <= end ? { note: `Walking gets you home just as soon (${walkAll} min).` } : {}),
   };
   return { legs: [leg], arrive: end };
 }
@@ -538,19 +529,6 @@ export function leaveAlert(leg: Leg, route: Route): PlanAlert {
   return { id: leg.id, title: leg.goal && leg.goal !== 'Home' ? `${origin} for ${leg.goal}` : origin, body: `${busLine(leg, route)}${walk}${last}` };
 }
 
-/** Pushes for legs with no bus time: the walking deadline, a little ahead of it. */
-export function walkAlerts(plan: DayPlan, now: number, fired: string[]): PlanAlert[] {
-  return plan.legs
-    .filter((leg) => leg.kind === 'bus' && !leg.bus && leg.walkInstead?.leaveBy != null)
-    .filter((leg) => now >= leg.walkInstead!.leaveBy! - 10 * MIN && now < leg.walkInstead!.leaveBy! + 5 * MIN)
-    .filter((leg) => !fired.includes(`${plan.date}:walk:${leg.id}`))
-    .map((leg) => ({
-      id: `walk:${leg.id}`,
-      title: `No bus time yet for ${leg.goal}`,
-      body: `To walk to ${leg.walkInstead!.to}, leave by ${formatClock(leg.walkInstead!.leaveBy!)} (${leg.walkInstead!.minutes} min).`,
-    }));
-}
-
 /**
  * Bus-home alerts. The first comes up to 15 minutes before the class ends, for a bus you could set
  * off for soon after it. After the last class every later bus is announced too, a few minutes
@@ -624,8 +602,8 @@ export function planAnswer(plan: DayPlan, route: Route, now: number): PlanAnswer
 
   if (leg.kind === 'bus') {
     if (!leg.bus) {
-      const walk = leg.walkInstead?.leaveBy ? ` To walk instead, leave by ${formatClock(leg.walkInstead.leaveBy)} (${leg.walkInstead.minutes} min).` : '';
-      const detail = `${leg.note ?? ''}${walk}`;
+      if (leg.warn) return { tone: 'unknown', lead: leg.title, headline: 'No bus', detail: leg.warn };
+      const detail = leg.note ?? '';
       if (leg.notBefore !== undefined && leg.notBefore - now > 30 * MIN) {
         return { tone: 'calm', lead: `${leg.title}, not before`, headline: formatClock(leg.notBefore), detail };
       }

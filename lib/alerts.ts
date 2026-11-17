@@ -6,7 +6,10 @@ const MOVING_MPH = 4;
 /** Idle this long and the next movement counts as service starting. */
 const SERVICE_GAP_MS = 180 * MINUTE;
 const OUTAGE_NO_SIGNAL_MS = 10 * MINUTE;
-const OUTAGE_NOT_MOVING_MS = 20 * MINUTE;
+/** Still this long and it's probably the driver's break: no live times until it moves. */
+const BREAK_MS = 10 * MINUTE;
+/** Breaks run to 40 minutes or so. Only well past that is the bus worth an alert as "not running". */
+const OUTAGE_NOT_MOVING_MS = 60 * MINUTE;
 /** The leave alert re-arms once the bus is this far past the lead time, so it fires once per approach. */
 const REARM_MARGIN_SECONDS = 120;
 const MIN_END_SAMPLES = 2;
@@ -160,7 +163,7 @@ export function canCatch(etaSeconds: number, stop: Stop, prefs: Prefs): boolean 
 
 /** Parked this long, it's on a break or done for the day, even though the feed still says live. */
 export function parkedUp(parkedSince: number | null, now: number): boolean {
-  return parkedSince !== null && now - parkedSince >= OUTAGE_NOT_MOVING_MS;
+  return parkedSince !== null && now - parkedSince >= BREAK_MS;
 }
 
 function isPastServiceEnd(state: AlertState, now: number): boolean {

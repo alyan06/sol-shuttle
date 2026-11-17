@@ -1,5 +1,5 @@
 import { canCatch, parkedUp } from './alerts.ts';
-import { formatClock, formatSince } from './time.ts';
+import { formatClock, formatSince, tempeDayKey, tempeWeekday } from './time.ts';
 import type { FeedStatus, Prefs, Route, StopEta } from './types.ts';
 
 export type Tone = 'calm' | 'go' | 'here' | 'unknown';
@@ -23,6 +23,10 @@ type Input = {
   /** When a currently parked bus last moved. Null while it's moving. */
   parkedSince: number | null;
   onRoute: boolean;
+  /** Where a parked bus is, in words ("at SoL"), when known. */
+  breakPlace?: string | null;
+  /** When this weekday's usual break ends, if the bus is in one. */
+  breakUntil?: number | null;
 };
 
 /** Leaving within this many seconds reads as "now"; shaving it finer would promise false precision. */
@@ -40,7 +44,9 @@ function lastSeenText(now: number, lastSeenAt: number | null): string {
 }
 
 /** Turns the raw feed into the one thing to do. Never shows a time it can't stand behind. */
-export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSince }: Input): Answer {
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSince, breakPlace, breakUntil }: Input): Answer {
   if (status === 'offline') {
     return { tone: 'unknown', lead: 'Right now', headline: 'Not running', detail: lastSeenText(now, lastSeenAt) };
   }
@@ -49,7 +55,12 @@ export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSi
   }
   // It keeps reporting every 5 min while parked, so "live" alone would say "Bus is here" all night.
   if (parkedUp(parkedSince, now)) {
-    return { tone: 'unknown', lead: 'Right now', headline: 'Not running', detail: `Parked since ${formatSince(parkedSince!, now)}. Times come back when it moves.` };
+    // Parked since an earlier day: it hasn't started yet. Parked since earlier today: probably a break.
+    if (tempeDayKey(parkedSince!) !== tempeDayKey(now)) {
+      return { tone: 'unknown', lead: 'Right now', headline: 'Not running', detail: `Parked since ${formatSince(parkedSince!, now)}. Times come back when it moves.` };
+    }
+    const until = breakUntil ? ` On ${DAYS[tempeWeekday(now)]}s it usually starts again around ${formatClock(breakUntil)}.` : ' Times come back when it moves.';
+    return { tone: 'unknown', lead: 'Probably the driver’s break', headline: 'On a break', detail: `Parked${breakPlace ? ` ${breakPlace}` : ''} since ${formatClock(parkedSince!)}.${until}` };
   }
   if (route.path.length === 0) {
     return { tone: 'unknown', lead: 'The bus is live', headline: 'Learning route', detail: 'Times appear once a full loop has been recorded.' };

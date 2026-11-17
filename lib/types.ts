@@ -111,6 +111,10 @@ export type AlertEvent = { kind: AlertKind; title: string; body: string };
 /** One stop visit in a day's log. Times are seconds after midnight in Tempe; null = not observed. */
 export type Visit = { stop: string; arr: number | null; dep: number | null };
 
+export type BreakPlace = 'sol' | 'gammage' | 'east' | 'elsewhere';
+/** The bus standing still for 10 minutes or more in the middle of the day. Seconds after midnight. */
+export type BusBreak = { from: number; to: number; place: BreakPlace };
+
 export type DayLog = {
   day: string;
   weekday: number;
@@ -121,6 +125,10 @@ export type DayLog = {
   partial?: true;
   /** Where the bus went when it left the learned route: [second of day, lat, lng]. Kept for a week, to learn the detour from. */
   detour?: [number, number, number][];
+  /** Probable driver's breaks, logged from 2026-11-17. */
+  breaks?: BusBreak[];
+  /** Where the bus has been standing since it last moved, to say where a break was. */
+  stillAt?: [number, number];
 };
 
 export type History = { days: DayLog[] };
@@ -140,6 +148,8 @@ export type Timetable = {
   /** Typical seconds between one bus and the next at the same stop, from every logged day. Null until there are enough. */
   loopSec: number | null;
   arrivals: Record<string, TimetableSlot[]>;
+  /** Breaks that recur on this weekday: usual start and end, seconds after midnight. */
+  breaks?: { from: number; to: number }[];
 };
 
 /** A building on campus. `code` is ASU's own short name for it, as printed on a class schedule. */

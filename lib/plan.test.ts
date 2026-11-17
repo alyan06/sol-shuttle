@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planAnswer, planDay, walkAlerts, withinAlertWindow, type LiveBus, type PlanInput } from './plan.ts';
+import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planAnswer, planDay, withinAlertWindow, type LiveBus, type PlanInput } from './plan.ts';
 import { defaultSchedule } from './schedule.ts';
 import { formatClock } from './time.ts';
 import type { DayOverride, Route, Schedule, Timetable } from './types.ts';
@@ -93,14 +93,13 @@ describe('getting to class', () => {
     assert.equal(clock(leg(p, 'out').bus!.at), '7:51 AM');
   });
 
-  it('says so when no bus makes it, and offers the walk', () => {
+  it('says so when no bus makes it, and never suggests walking the whole way', () => {
     const p = plan(T(8, 40), live(10));
     const out = leg(p, 'out');
     // Bus at SoL 8:50, Gammage 9:10, 8 min walk: in the room 9:18 for a 9:00 class.
     assert.equal(out.warn, 'Late for CSE 205: in the room around 9:18 AM.');
-    // Walking takes 52 min, so by 8:40 it's too late to offer.
-    assert.equal(out.walkInstead, undefined);
-    assert.equal(leg(plan(T(7, 55), null), 'out').walkInstead!.minutes, 52);
+    assert.equal(out.kind, 'bus');
+    assert.doesNotMatch(JSON.stringify(p.legs), /On foot|walk instead|Walking gets/i);
   });
 
   it('calls a bus tight when it makes the class only if nothing slips', () => {
@@ -115,7 +114,6 @@ describe('getting to class', () => {
     assert.equal(out.bus, undefined);
     assert.equal(out.start, null);
     assert.ok(out.notBefore! > T(12, 0, 1) && out.notBefore! < T(13, 0, 1));
-    assert.equal(clock(out.walkInstead!.leaveBy), '12:35 PM');
   });
 
   it('uses the learned timetable beyond what the live bus shows', () => {
@@ -224,13 +222,13 @@ describe('alert hours each person sets', () => {
 describe('service limits', () => {
   const ends7pm = timetable({ lastSec: 19 * 3600 });
 
-  it('sends you home on foot when class ends after the last bus', () => {
+  it('says there is no bus home when class ends after the last bus', () => {
     // Thursday 2:50 PM, class over at 2:45, and the bus parks at 3:00.
     const p = plan(T(14, 50, 3), live(25), { day: 3, timetable: timetable({ weekday: 4, lastSec: 15 * 3600 }) });
     const back = leg(p, 'back');
-    assert.equal(back.kind, 'walk');
-    assert.equal(back.title, 'Walk home');
+    assert.deepEqual([back.kind, back.title, back.bus], ['bus', 'Bus home', undefined]);
     assert.match(back.warn!, /bus finishes around 3:00 PM/);
+    assert.deepEqual([planAnswer(p, route, T(14, 50, 3))!.headline], ['No bus']);
   });
 
   it('marks the last bus home', () => {
@@ -242,12 +240,13 @@ describe('service limits', () => {
     assert.equal(leg(later, 'back').lastBus, true);
   });
 
-  it('walks both ways on a day the bus does not run', () => {
+  it('says there is no bus either way on a day the bus does not run', () => {
     const p = plan(T(7), null, { timetable: timetable({ weekday: 1, runs: false }) });
     assert.deepEqual(ids(p), ['out', 'class:c1', 'class:c2', 'back']);
-    assert.equal(leg(p, 'out').kind, 'walk');
+    assert.deepEqual([leg(p, 'out').kind, leg(p, 'out').bus], ['bus', undefined]);
     assert.match(leg(p, 'out').warn!, /No bus on Mondays/);
-    assert.equal(leg(p, 'back').kind, 'walk');
+    assert.deepEqual([leg(p, 'back').kind, leg(p, 'back').bus], ['bus', undefined]);
+    assert.equal(planAnswer(p, route, T(7))!.headline, 'No bus');
     assert.match(p.service!, /No bus on Mondays/);
   });
 
@@ -299,14 +298,6 @@ describe('committing to a bus', () => {
     assert.match(alert.body, /Bus reaches SoL around 8:10 AM, Gammage by 8:30 AM\. 5 min walk to the stop\./);
   });
 
-  it('nudges about the walking deadline once when there is no bus time', () => {
-    const p = plan(T(12, 28, 1), null, { day: 1 });
-    const alerts = walkAlerts(p, T(12, 28, 1), []);
-    assert.equal(alerts.length, 1);
-    assert.match(alerts[0].body, /leave by 12:35 PM \(50 min\)/);
-    assert.equal(walkAlerts(p, T(12, 28, 1), [`${p.date}:walk:out`]).length, 0);
-    assert.equal(walkAlerts(p, T(11, 0, 1), []).length, 0);
-  });
 });
 
 describe('planAnswer', () => {
@@ -327,7 +318,7 @@ describe('planAnswer', () => {
   it('gives a not-before time when the bus is too far off to know', () => {
     const a = planAnswer(plan(T(8, 0, 1), live(10), { day: 1 }), route, T(8, 0, 1))!;
     assert.equal(a.lead, 'Bus to campus, not before');
-    assert.match(a.detail, /To walk instead, leave by 12:35 PM/);
+    assert.match(a.detail, /The bus time shows up about an hour before/);
   });
 
   it('does not say "later" for a ride that is due while the bus is silent', () => {
@@ -569,5 +560,26 @@ describe('a one-off trip planned for today', () => {
 
   it('ignores a trip that belongs to another day', () => {
     assert.deepEqual(ids(plan(T(9, 0, 4), live(10), trip('arrive', T(10, 0, 3)))), []);
+  });
+});
+
+describe('the driver\'s breaks', () => {
+  it('says the bus is probably on a break when it has been parked', () => {
+    const parked: LiveBus = { ...live(10)!, parked: true };
+    const out = leg(plan(T(8), parked), 'out');
+    assert.equal(out.bus, undefined);
+    assert.match(out.note!, /probably on the driver’s break/);
+  });
+
+  it('does not guess a bus inside a break the bus takes most days', () => {
+    // Monday 11:40, the bus reaches Gammage 11:55 and then, by the loop, 12:30 and 1:05. It usually breaks 12:15 to 12:50.
+    const usual = timetable({ weekday: 1, breaks: [{ from: 12 * 3600 + 15 * 60, to: 12 * 3600 + 50 * 60 }] });
+    const times = (more: Parameters<typeof plan>[2]) => {
+      const p = plan(T(11, 50), live(20), more);
+      return p.homeWatch?.next ? clock(p.homeWatch.next.at) : null;
+    };
+    // Without break knowledge, 12:30 is the next bus home after missing the 11:55.
+    assert.equal(times({}), '12:30 PM');
+    assert.equal(times({ timetable: usual }), '1:05 PM');
   });
 });

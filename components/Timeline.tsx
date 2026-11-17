@@ -40,9 +40,8 @@ const ICONS: Record<Leg['kind'], React.ReactNode> = {
 
 function detail(leg: Leg, route: Route): string {
   if (leg.kind === 'bus') {
-    const walk = leg.walkInstead ? ` On foot: ${leg.walkInstead.minutes} min${leg.walkInstead.leaveBy ? `, leave by ${formatClock(leg.walkInstead.leaveBy)}` : ''}.` : '';
     const stop = leg.bus && leg.walkMin ? ` ${leg.walkMin} min walk to the stop.` : '';
-    return `${busLine(leg, route)}${stop}${leg.lastBus ? ' Last bus today.' : ''}${walk}`;
+    return `${busLine(leg, route)}${stop}${leg.lastBus ? ' Last bus today.' : ''}`;
   }
   if (leg.kind === 'walk') return `${leg.walkMin} min, there by ${formatClock(leg.end!)}.`;
   const where = [leg.place, leg.room].filter(Boolean).join(', ');

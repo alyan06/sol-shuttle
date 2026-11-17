@@ -1,6 +1,6 @@
 import { evaluate, isWatching } from './alerts.ts';
 import { liveBus } from './day.ts';
-import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planDay, walkAlerts, withinAlertWindow, type DayPlan } from './plan.ts';
+import { advanceProgress, busHomeAlerts, headsUpAlerts, leaveAlert, planDay, withinAlertWindow, type DayPlan } from './plan.ts';
 import { CAMPUS, HOME, hasPlan, stopWalkMinutes } from './schedule.ts';
 import type { Tracking, User } from './store.ts';
 import { tempeDayKey } from './time.ts';
@@ -50,7 +50,6 @@ export function userTick({ now, snapshot, route, tracking, timetable, user }: Us
     if (settings.prefs.alerts.leave) {
       for (const leg of step.committed) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
       once(headsUpAlerts(plan, route, now, planFired));
-      once(walkAlerts(plan, now, planFired));
     }
     const due = plan.legs.find((leg) => leg.committed && leg.bus && now >= leg.bus.at - FOLLOW_BEFORE_MS && now < leg.bus.at + FOLLOW_AFTER_MS);
     const justNow = step.committed[0];

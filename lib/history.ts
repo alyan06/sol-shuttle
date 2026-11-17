@@ -1,3 +1,4 @@
+import { MIN_BREAK_S, breakPlace } from './breaks.ts';
 import { tempeDayKey, tempeSecondOfDay, tempeWeekday } from './time.ts';
 import type { DayLog, History, Route, Snapshot } from './types.ts';
 
@@ -49,9 +50,18 @@ export function recordObservation(
   // a few seconds of what the bus did. A position from before midnight still counts as today.
   const second = tempeSecondOfDay(tempeDayKey(ping.time) === log.day ? ping.time : now);
 
+  const round = (value: number) => Math.round(value * 1e5) / 1e5;
   if (ping.mph >= MOVING_MPH) {
+    // Moving again after standing still 10 minutes or more in the middle of the day: probably a break.
+    if (log.lastMove !== null && second - log.lastMove >= MIN_BREAK_S) {
+      const [lat, lng] = log.stillAt ?? [ping.lat, ping.lng];
+      log.breaks = [...(log.breaks ?? []), { from: log.lastMove, to: second, place: breakPlace({ lat, lng }, route) }];
+    }
     log.firstMove ??= second;
     log.lastMove = second;
+    delete log.stillAt;
+  } else if (log.firstMove !== null) {
+    log.stillAt ??= [round(ping.lat), round(ping.lng)];
   }
 
   // Without a place on the loop there's no saying whether it left a stop, so visits stay as they are.

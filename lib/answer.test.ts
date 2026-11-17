@@ -54,10 +54,13 @@ describe('answerFor', () => {
 
   it('stops saying the bus is here once it has been parked a long time', () => {
     const at = { eta: { stopId: 'home', seconds: 0, atStop: true } };
-    assert.equal(ask(0, { ...at, parkedSince: NOW - 10 * 60_000 }).headline, 'Bus is here');
+    assert.equal(ask(0, { ...at, parkedSince: NOW - 9 * 60_000 }).headline, 'Bus is here');
+    // Parked 10 minutes or more in the middle of the day is probably the driver's break.
     const a = ask(0, { ...at, parkedSince: NOW - 41 * 60_000 });
-    assert.equal(a.headline, 'Not running');
-    assert.match(a.detail, /Parked since/);
+    assert.equal(a.headline, 'On a break');
+    assert.match(a.detail, /Parked since 9:19 AM\. Times come back when it moves\./);
+    const b = ask(0, { ...at, parkedSince: NOW - 25 * 60_000, breakPlace: 'just east of SoL', breakUntil: NOW + 15 * 60_000 });
+    assert.equal(b.detail, 'Parked just east of SoL since 9:35 AM. On Fridays it usually starts again around 10:15 AM.');
   });
 
   it('names the day when the bus parked before today', () => {

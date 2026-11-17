@@ -7,10 +7,11 @@ import type { PlanChange } from '@/app/api/plan/route';
 import type { ShuttleResponse } from '@/app/api/shuttle/route';
 import { defaultPrefs, parkedUp } from '@/lib/alerts.ts';
 import { answerFor } from '@/lib/answer.ts';
+import { breakPlace, placeText } from '@/lib/breaks.ts';
 import { advanceProgress, planAnswer, planDay } from '@/lib/plan.ts';
 import { CAMPUS, HOME, hasClasses, hasPlan, stopWalkMinutes } from '@/lib/schedule.ts';
 import { serviceState } from '@/lib/service.ts';
-import { formatClock, formatSince, tempeDayKey } from '@/lib/time.ts';
+import { formatClock, formatSince, tempeDayKey, tempeMidnight, tempeSecondOfDay } from '@/lib/time.ts';
 import type { Progress, QuickTrip as Trip, Route, Schedule } from '@/lib/types.ts';
 import { post, useAccount } from './Account';
 import { TopBar } from './AppShell';
@@ -176,6 +177,13 @@ export default function Tracker({ route }: { route: Route }) {
       lastSeenAt: data.lastSeen?.time ?? null,
       parkedSince: data.parkedSince,
       onRoute: data.located !== null,
+      breakPlace: data.lastSeen ? placeText(breakPlace(data.lastSeen, route)) : null,
+      // In a break this weekday usually takes, say when it usually ends.
+      breakUntil: (() => {
+        const second = tempeSecondOfDay(data.now);
+        const usual = data.private?.timetable?.breaks?.find((window) => second >= window.from - 15 * 60 && second < window.to);
+        return usual ? tempeMidnight(data.now) + usual.to * 1000 : null;
+      })(),
     });
   }, [data, eta, planned, prefs, route, stopId]);
 
@@ -199,7 +207,8 @@ export default function Tracker({ route }: { route: Route }) {
   const stoppedAt = route.stops.find((s) => s.id === upcoming.find((e) => e.atStop)?.stopId);
 
   // Built from the bus's place on the loop: Samsara's street addresses are often a block or two off.
-  let caption = out ? `Parked since ${formatSince(parkedSince!, data!.now)}` : 'Last known position';
+  const breakToday = out && parkedSince !== null && tempeDayKey(parkedSince) === tempeDayKey(data!.now);
+  let caption = breakToday ? `Probably on a break, ${placeText(breakPlace(data!.lastSeen!, route))}` : out ? `Parked since ${formatSince(parkedSince!, data!.now)}` : 'Last known position';
   if (live && stoppedAt) caption = `Stopped at ${stoppedAt.name}`;
   else if (detour && nextStop) caption = `Off its usual route, heading to ${nextStop.name}`;
   else if (detour) caption = 'Off its usual route';
@@ -214,7 +223,7 @@ export default function Tracker({ route }: { route: Route }) {
       <TopBar>
         <p className="freshness" data-live={live} role="status">
           <span className="dot" aria-hidden />
-          {failed ? 'Connection lost' : out ? 'Not moving' : freshness(now, data?.ping?.time, live && (data?.ping?.mph ?? 0) < 2)}
+          {failed ? 'Connection lost' : out ? (breakToday ? 'On a break' : 'Not moving') : freshness(now, data?.ping?.time, live && (data?.ping?.mph ?? 0) < 2)}
         </p>
       </TopBar>
 

@@ -1,3 +1,4 @@
+import { usualBreaks } from './breaks.ts';
 import type { DayLog, Timetable, TimetableSlot } from './types.ts';
 
 /** Arrivals on different days within this many seconds count as the same scheduled run. */
@@ -84,5 +85,6 @@ export function buildTimetable(days: DayLog[], weekday: number, seenEnds: number
     lastSure: lasts.length >= MIN_DAYS,
     loopSec: typicalLoop(days),
     arrivals,
+    breaks: usualBreaks(same),
   };
 }
