@@ -196,7 +196,11 @@ export type DayOverride = {
   homeAt?: number;
   /** One-off trips planned for today. */
   trips?: QuickTrip[];
+  /** "Going home / to campus now": set off at `at`, this many minutes on foot from the stop (0 = there already). */
+  goNow?: GoNow;
 };
+
+export type GoNow = { to: 'home' | 'campus'; at: number; walkMin: number };
 
 export type Schedule = {
   places: Place[];

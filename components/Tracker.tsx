@@ -15,6 +15,8 @@ import { formatClock, formatSince, tempeDayKey, tempeMidnight, tempeSecondOfDay 
 import type { Progress, QuickTrip as Trip, Route, Schedule } from '@/lib/types.ts';
 import { post, useAccount } from './Account';
 import { TopBar } from './AppShell';
+import GoNow from './GoNow';
+import PolicyNotice from './PolicyNotice';
 import QuickTrip from './QuickTrip';
 import { JoinGate, SignInCard } from './SignIn';
 import Timeline, { type OverrideChange } from './Timeline';
@@ -114,7 +116,9 @@ export default function Tracker({ route }: { route: Route }) {
     if (!current) return;
     const date = tempeDayKey(Date.now());
     const today = current.override?.date === date ? current.override : { date, skipped: [] };
-    setLocal({ schedule: { ...current, override: change === null ? null : { ...today, ...change } }, at: Date.now() });
+    const merged = change === null ? null : { ...today, ...change };
+    if (merged && merged.goNow === null) delete merged.goNow;
+    setLocal({ schedule: { ...current, override: merged as Schedule['override'] }, at: Date.now() });
     setPlanError(null);
     const send = async () => {
       const body: PlanChange = { override: change };
@@ -295,6 +299,7 @@ export default function Tracker({ route }: { route: Route }) {
       <div className="stack">
         {account.status === 'signed-out' && <SignInCard />}
         {signedIn && !joined && <JoinGate />}
+        {signedIn && <PolicyNotice />}
         {account.status === 'failed' && (
           <section className="panel">
             <p className="error" role="alert">
@@ -312,6 +317,8 @@ export default function Tracker({ route }: { route: Route }) {
             {planError}
           </p>
         )}
+
+        {joined && schedule && data && <GoNow now={data.now} plan={plan} schedule={schedule} route={route} timetable={data.private?.timetable ?? null} onChange={changeToday} />}
 
         {joined && schedule && data && (
           <QuickTrip

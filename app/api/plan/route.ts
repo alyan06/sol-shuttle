@@ -11,7 +11,7 @@ export type PlanChange = {
   /** Replaces whole top-level parts of the schedule: buildings, classes, walking settings. */
   schedule?: Partial<Omit<Schedule, 'override'>>;
   /** Merged into today's choices. Null clears them. */
-  override?: Partial<Omit<DayOverride, 'date'>> | null;
+  override?: (Partial<Omit<DayOverride, 'date' | 'goNow'>> & { goNow?: DayOverride['goNow'] | null }) | null;
 };
 
 const refuse = (error: string, status: number) => NextResponse.json({ error }, { status });

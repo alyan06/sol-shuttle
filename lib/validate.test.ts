@@ -133,3 +133,16 @@ describe('one-off trips', () => {
     assert.equal(cleanOverride(null, { trips: many }, '2026-11-09', NOW)!.trips!.length, 4);
   });
 });
+
+describe('cleanOverride: going now', () => {
+  const DAY = '2026-11-09';
+  const AT = Date.UTC(2026, 10, 9, 19);
+  it('keeps a real "going now" and drops one with a made-up time or distance', () => {
+    assert.deepEqual(cleanOverride(null, { goNow: { to: 'home', at: AT, walkMin: 3 } }, DAY, AT)!.goNow, { to: 'home', at: AT, walkMin: 3 });
+    assert.equal(cleanOverride(null, { goNow: { to: 'home', at: AT - 3_600_000, walkMin: 3 } }, DAY, AT)!.goNow, undefined);
+    assert.equal(cleanOverride(null, { goNow: { to: 'home', at: AT, walkMin: 2.5 } }, DAY, AT)!.goNow, undefined);
+    assert.equal(cleanOverride(null, { goNow: { to: 'work', at: AT, walkMin: 2 } }, DAY, AT)!.goNow, undefined);
+    const set = cleanOverride(null, { goNow: { to: 'campus', at: AT, walkMin: 0 } }, DAY, AT);
+    assert.equal(cleanOverride(set, { goNow: null }, DAY, AT)!.goNow, undefined);
+  });
+});

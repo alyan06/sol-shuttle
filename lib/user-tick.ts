@@ -48,7 +48,8 @@ export function userTick({ now, snapshot, route, tracking, timetable, user }: Us
     // The ride home, from the class that's ending or just ended, bus by bus until they're on one.
     if (settings.prefs.alerts.afterClass !== false) once(busHomeAlerts(plan, now, planFired));
     if (settings.prefs.alerts.leave) {
-      for (const leg of step.committed) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
+      // "Going now" was their own tap, so there's no "leave now" to tell them.
+      for (const leg of step.committed) if (!leg.going) events.push({ kind: 'plan', ...leaveAlert(leg, route) });
       once(headsUpAlerts(plan, route, now, planFired));
     }
     const due = plan.legs.find((leg) => leg.committed && leg.bus && now >= leg.bus.at - FOLLOW_BEFORE_MS && now < leg.bus.at + FOLLOW_AFTER_MS);

@@ -5,7 +5,8 @@ import { busLine, type DayPlan, type Leg } from '@/lib/plan.ts';
 import { formatClock } from '@/lib/time.ts';
 import type { DayOverride, Route, Schedule } from '@/lib/types.ts';
 
-export type OverrideChange = Partial<Omit<DayOverride, 'date'>> | null;
+/** Merged into today's choices; null clears them all, and goNow: null takes back "going now". */
+export type OverrideChange = (Partial<Omit<DayOverride, 'date' | 'goNow'>> & { goNow?: DayOverride['goNow'] | null }) | null;
 
 type Props = {
   plan: DayPlan;
@@ -70,7 +71,6 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
   const leftEarly = override?.leftAt !== undefined || override?.onBusAt !== undefined || override?.homeAt !== undefined;
   const inClass = leftEarly ? undefined : taken.find((leg) => leg.start! <= now && now < leg.end!);
   const laterClasses = inClass ? taken.filter((leg) => leg.start! >= inClass.end!) : [];
-  const onCampusNow = !leftEarly && taken.length > 0 && now >= taken[0].start! - 20 * MIN && now < Math.max(...taken.map((leg) => leg.end!));
   const committed = plan.legs.some((leg) => leg.committed);
   // Going home after the class you're in only needs saying when something else was planned after it.
   const canHeadHome = inClass && laterClasses.length > 0;
@@ -79,13 +79,6 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
 
   function toggleSkip(classId: string) {
     onChange({ skipped: skipped.includes(classId) ? skipped.filter((id) => id !== classId) : [...skipped, classId] });
-  }
-
-  function leaveCampus() {
-    const last = taken.filter((leg) => leg.end! <= now).at(-1) ?? taken[0];
-    const block = schedule.classes.find((c) => c.id === last.classId);
-    const unfinished = classes.filter((leg) => leg.end! > now).map((leg) => leg.classId!);
-    onChange({ skipped: [...new Set([...skipped, ...unfinished])], leftAt: now, leftPlaceId: block?.placeId });
   }
 
   function homeAfterThisClass() {
@@ -117,7 +110,11 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
                 : `No bus time right now. You'll hear about each one, timed from ${watch.place}.`}
             {watch.until === null && ' Alerts for each bus keep coming until you tap one of these.'}
           </p>
-          <div className="button-row">
+          <div className="button-row wrap">
+            {/* Standing at Gammage already: every bus that hasn't left yet is one they can catch. */}
+            <button className="button" onClick={() => onChange({ goNow: { to: 'home', at: Date.now(), walkMin: 0 } })}>
+              I&apos;m at the stop
+            </button>
             <button className="button" onClick={() => onChange({ onBusAt: now })}>
               I&apos;m on the bus
             </button>
@@ -169,16 +166,11 @@ export default function Timeline({ plan, schedule, route, now, onChange }: Props
         <p className="note">Nothing planned for the rest of today.</p>
       )}
 
-      {(canHeadHome || onCampusNow || committed || hasChoices) && (
+      {(canHeadHome || committed || hasChoices) && (
         <div className="button-row wrap">
           {canHeadHome && (
             <button className="button" onClick={homeAfterThisClass}>
               Home after this class
-            </button>
-          )}
-          {onCampusNow && !inClass && (
-            <button className="button" onClick={leaveCampus}>
-              Leaving campus now
             </button>
           )}
           {committed && (

@@ -184,6 +184,14 @@ export function cleanOverride(current: DayOverride | null, change: unknown, date
     }).slice(0, MAX_TRIPS);
     if (next.trips.length === 0) delete next.trips;
   }
+  if ('goNow' in change) {
+    const raw = change.goNow;
+    // "Now" means now: a few minutes either way for a slow phone or a clock that's off.
+    const at = isObject(raw) && typeof raw.at === 'number' && Math.abs(raw.at - now) < 5 * 60_000 ? raw.at : undefined;
+    const ok = isObject(raw) && (raw.to === 'home' || raw.to === 'campus') && at !== undefined && Number.isInteger(raw.walkMin) && (raw.walkMin as number) >= 0 && (raw.walkMin as number) <= 60;
+    if (ok) next.goNow = { to: raw.to as 'home' | 'campus', at: at!, walkMin: raw.walkMin as number };
+    else delete next.goNow;
+  }
   if (isObject(change.outEarly)) {
     next.outEarly = Object.fromEntries(
       Object.entries(change.outEarly)

@@ -4,9 +4,10 @@ import { TopBar } from '@/components/AppShell';
 
 export const metadata: Metadata = { title: 'Terms' };
 
-const UPDATED = 'November 16, 2026';
+const UPDATED = 'November 20, 2026';
 
 export default function TermsPage() {
+  const contact = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
   return (
     <main className="page">
       <TopBar />
@@ -28,9 +29,15 @@ export default function TermsPage() {
         <h2>Your account</h2>
         <ul>
           <li>You sign in with your own Google account. The app is meant for people who live at SoL.</li>
+          <li>You must be 13 or older to use it.</li>
           <li>What you enter is yours. You can change it or delete your account at any time in Settings.</li>
           <li>Don&apos;t try to break the app, get at other people&apos;s data, or flood it with requests. An account used that way may be removed.</li>
         </ul>
+
+        <h2>Liability</h2>
+        <p>
+          To the extent the law allows, whoever runs the app isn&apos;t liable for any loss or damage from using it, including missed buses, classes or appointments.
+        </p>
 
         <h2>It may change or stop</h2>
         <p>
@@ -40,9 +47,24 @@ export default function TermsPage() {
         <h2>Cost</h2>
         <p>The app is free. There are no ads and nothing to buy.</p>
 
+        <h2>Governing law</h2>
+        <p>These terms are governed by the laws of Arizona.</p>
+
+        <h2>Credits</h2>
+        <p>
+          Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, map tiles by <a href="https://openfreemap.org">OpenFreeMap</a> with <a href="https://openmaptiles.org">OpenMapTiles</a>. Building names and places from ASU&apos;s public campus map. Bus positions from the apartment&apos;s public Samsara tracking link.
+        </p>
+
         <h2>Questions</h2>
         <p>
-          See the <Link href="/privacy">privacy page</Link> for how to get in touch. The date at the top changes whenever this page does.
+          {contact ? (
+            <>
+              Write to <a href={`mailto:${contact}`}>{contact}</a>.{' '}
+            </>
+          ) : (
+            <>See the <Link href="/privacy">privacy page</Link> for how to get in touch. </>
+          )}
+          The date at the top changes whenever this page does.
         </p>
         <p>
           <Link href="/">Back to the bus</Link>

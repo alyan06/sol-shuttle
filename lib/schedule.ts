@@ -19,7 +19,8 @@ export function hasClasses(schedule: Schedule): boolean {
 
 /** Whether there is anything to plan on this date: classes at all, or a one-off trip made today. */
 export function hasPlan(schedule: Schedule, date: string): boolean {
-  return hasClasses(schedule) || (schedule.override?.date === date && (schedule.override.trips?.length ?? 0) > 0);
+  const today = schedule.override?.date === date ? schedule.override : null;
+  return hasClasses(schedule) || (today !== null && ((today.trips?.length ?? 0) > 0 || today.goNow != null));
 }
 
 /** What's on for a given day, earliest first. */
@@ -41,8 +42,9 @@ export function normalizeSchedule(saved: unknown): Schedule {
   const classes = (Array.isArray(raw.classes) ? raw.classes : fromPatterns).map((block) => ({ ...block, days: block.days ?? [] }));
   let override: DayOverride | null = null;
   if (raw.override && typeof raw.override.date === 'string') {
-    const { date, skipped, leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt, trips } = raw.override;
-    const kept = { leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt, trips };
+    // Every field of today's choices is listed here: one left out is silently lost on the next read.
+    const { date, skipped, leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt, trips, goNow } = raw.override;
+    const kept = { leftAt, leftPlaceId, replanAt, outEarly, onBusAt, homeAt, trips, goNow };
     override = { date, skipped: skipped ?? [], ...Object.fromEntries(Object.entries(kept).filter(([, value]) => value !== undefined)) };
   }
   return {

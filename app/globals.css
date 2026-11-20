@@ -1229,6 +1229,37 @@ a {
   gap: 8px;
 }
 
+/* Going now: which way, then how far from the stop, in one or two taps. */
+.go-now > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.go-now-ways {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.go-now-ask {
+  display: grid;
+  gap: 10px;
+}
+
+.go-now-question {
+  font-weight: 650;
+}
+
+.go-now-chips {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.go-now-chips .button {
+  min-width: 0;
+}
+
 /* ---------- Classes ---------- */
 
 .blocks {

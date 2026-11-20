@@ -222,7 +222,8 @@ export default function ShuttleMap({ route, ping, live, s, ageMs, focusStopId, d
       style: dark ? STYLE_DARK : STYLE_LIGHT,
       ...framing,
       pitch: OVERVIEW_PITCH,
-      attributionControl: { compact: true },
+      // OpenStreetMap asks for its credit to be visible, so it is never folded away behind a button.
+      attributionControl: { compact: false },
       dragRotate: false,
       pitchWithRotate: false,
       // On a phone the map is most of a screen tall. One finger has to scroll the page past it,

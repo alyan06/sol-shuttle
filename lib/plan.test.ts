@@ -583,3 +583,57 @@ describe('the driver\'s breaks', () => {
     assert.equal(times({ timetable: usual }), '1:05 PM');
   });
 });
+
+describe('going now', () => {
+  // Monday 11:50, PHY 121 at Coor Hall (7 min walk) ended at 11:45.
+  it('keeps the bus that is coming when you say you are at the stop', () => {
+    // Bus reaches Gammage at 11:53. From Coor Hall that's out of reach, so the plan watches the next one.
+    const before = plan(T(11, 50), live(18));
+    assert.equal(clock(before.homeWatch!.next!.at), '12:28 PM');
+    // At the stop: the 11:53 is yours.
+    const at = plan(T(11, 50), live(18), { ov: { goNow: { to: 'home', at: T(11, 50), walkMin: 0 } } });
+    assert.equal(clock(leg(at, 'back').bus!.at), '11:53 AM');
+    assert.equal(at.homeWatch, null);
+    const answer = planAnswer(at, route, T(11, 50))!;
+    assert.deepEqual([answer.headline, answer.tone], ['3 min', 'go']);
+    assert.match(answer.detail, /You said you’re at the Gammage stop/);
+    // Two minutes later, with the bus a minute out, it still is: no "you can't make it" while you stand there.
+    const later = plan(T(11, 52), live(16), { ov: { goNow: { to: 'home', at: T(11, 50), walkMin: 0 } } });
+    assert.equal(clock(leg(later, 'back').bus!.at), '11:53 AM');
+  });
+
+  it('takes a bus 5 min out when you are 3 min from the stop, and not when you are 10', () => {
+    const near = plan(T(11, 50), live(20), { ov: { goNow: { to: 'home', at: T(11, 50), walkMin: 3 } } });
+    assert.equal(clock(leg(near, 'back').bus!.at), '11:55 AM');
+    const far = plan(T(11, 50), live(20), { ov: { goNow: { to: 'home', at: T(11, 50), walkMin: 10 } } });
+    assert.equal(clock(leg(far, 'back').bus!.at), '12:30 PM');
+  });
+
+  it('calls it tight when the bus could come early', () => {
+    const p = plan(T(11, 50), live(19), { ov: { goNow: { to: 'home', at: T(11, 50), walkMin: 4 } } });
+    // Bus due 11:54 give or take 2 min, you're there 11:54.
+    assert.equal(clock(leg(p, 'back').bus!.at), '11:54 AM');
+    assert.match(leg(p, 'back').note!, /Tight/);
+  });
+
+  it('plans a bus to campus on a day with nothing else on, and commits to it without a leave alert', () => {
+    const now = T(12, 0, 5);
+    const going = { goNow: { to: 'campus' as const, at: now, walkMin: 5 } };
+    const p = plan(now, live(8), { day: 5, ov: going });
+    assert.deepEqual(ids(p), ['go']);
+    assert.equal(clock(leg(p, 'go').bus!.at), '12:08 PM');
+    assert.equal(leg(p, 'go').going, true);
+    const step = advanceProgress(null, p, now);
+    assert.deepEqual(step.committed.map((l) => l.id), ['go']);
+    // The same bus isn't written down twice.
+    assert.equal(advanceProgress(step.progress, p, now).committed.length, 0);
+    // Until it gets to SoL it is still followed live: a later time moves the bus, it isn't stuck on the old one.
+    const slipped = plan(now + 60_000, live(9), { day: 5, ov: going, progress: step.progress });
+    assert.equal(clock(leg(slipped, 'go').bus!.at), '12:10 PM');
+  });
+
+  it('forgets "going now" after an hour and a half', () => {
+    const p = plan(T(13, 30, 5), live(8), { day: 5, ov: { goNow: { to: 'campus', at: T(12, 0, 5), walkMin: 5 } } });
+    assert.deepEqual(ids(p), []);
+  });
+});

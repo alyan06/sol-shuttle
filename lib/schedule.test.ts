@@ -64,3 +64,11 @@ describe('classesOn', () => {
     assert.deepEqual(classesOn(schedule, 2, '2026-11-17'), []);
   });
 });
+
+describe('normalizeSchedule keeps the choices made today', () => {
+  const read = normalizeSchedule;
+  it('keeps every field of the override, going now included', () => {
+    const override = { date: '2026-11-20', skipped: ['c1'], leftAt: 1, leftPlaceId: 'a', replanAt: 2, outEarly: { c1: 3 }, onBusAt: 4, homeAt: 5, trips: [{ id: 't1', kind: 'arrive' as const, at: 6 }], goNow: { to: 'home' as const, at: 7, walkMin: 0 } };
+    assert.deepEqual(read({ classes: [], override }).override, override);
+  });
+});
