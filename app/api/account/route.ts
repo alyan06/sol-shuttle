@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   const user = await viewer(request);
   if (!user) return NextResponse.json({ error: 'signed-out' }, { status: 401 });
-  if (tooManyTries(request)) return NextResponse.json({ error: 'slow down' }, { status: 429 });
+  if (tooManyTries(request, user.id)) return NextResponse.json({ error: 'slow down' }, { status: 429 });
   const change = (await request.json().catch(() => ({}))) as Change;
 
   if (change.join !== undefined) {

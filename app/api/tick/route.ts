@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { bearerMatches } from '@/lib/auth.ts';
 import { runTick } from '@/lib/tick.ts';
 
 export const dynamic = 'force-dynamic';
@@ -6,7 +7,7 @@ export const dynamic = 'force-dynamic';
 function authorized(request: Request): boolean {
   const secret = process.env.TICK_SECRET;
   if (!secret) return process.env.NODE_ENV !== 'production';
-  return request.headers.get('authorization') === `Bearer ${secret}`;
+  return bearerMatches(request.headers.get('authorization'), secret);
 }
 
 export async function POST(request: Request) {

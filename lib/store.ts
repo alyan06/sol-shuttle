@@ -172,6 +172,17 @@ export async function listUsers(): Promise<User[]> {
   return rows.filter((row): row is Row => row !== null).map(toUser);
 }
 
+/** How many accounts exist. Only ids are read. */
+export async function countUsers(): Promise<number> {
+  const db = supabase();
+  if (db) return ((await rest(db, 'shuttle_users?select=id')) as unknown[]).length;
+  try {
+    return (await readdir(USERS_DIR)).filter((name) => name.endsWith('.json')).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** Makes the account if it isn't there yet, and returns it either way. Never overwrites an existing one. */
 export async function ensureUser(account: { id: string; email?: string | null; name?: string | null; joined?: boolean }): Promise<User> {
   const existing = await loadUser(account.id);

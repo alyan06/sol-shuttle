@@ -80,7 +80,7 @@ export default function PrivacyPage() {
         <h2>Where it lives, and other services that see some data</h2>
         <ul>
           <li>The app is hosted by Vercel and the database by Supabase, both in the United States.</li>
-          <li>Vercel and Supabase keep short-lived server logs, including IP addresses, to run and secure the service.</li>
+          <li>Vercel and Supabase keep short-lived server logs, including IP addresses, to run and secure the service. The app itself counts requests from each IP address for one minute, in memory, to turn away floods and guessing; those counts are never written down.</li>
           <li>The map&apos;s streets load from OpenFreeMap, which sees your IP address when the map loads, like any website you visit.</li>
           <li>Signing in goes through Google, under Google&apos;s own privacy policy.</li>
           <li>Alerts travel through your phone maker&apos;s notification service (Apple, Google or Mozilla). They are encrypted on the way, so that service can deliver an alert but can&apos;t read it.</li>

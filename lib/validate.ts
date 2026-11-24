@@ -213,7 +213,8 @@ export function cleanSubscription(value: unknown): PushSubscriptionJson | null {
   } catch {
     return null;
   }
-  if (url.protocol !== 'https:' || value.endpoint.length > 1000 || !PUSH_HOSTS.some((host) => host.test(url.hostname))) return null;
+  // No user name, password or odd port either: only the push service's own HTTPS address.
+  if (url.protocol !== 'https:' || url.port !== '' || url.username || url.password || value.endpoint.length > 1000 || !PUSH_HOSTS.some((host) => host.test(url.hostname))) return null;
   return { endpoint: value.endpoint, keys: { p256dh, auth } };
 }
 
