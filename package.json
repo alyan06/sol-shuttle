@@ -14,7 +14,9 @@
     "postinstall": "node scripts/copy-map-worker.mjs",
     "dev:locked": "node scripts/dev-local.mjs --passcode letmein",
     "dev:hosted": "next dev -p 3240",
-    "dev:replay": "node scripts/dev-local.mjs --replay"
+    "dev:replay": "node scripts/dev-local.mjs --replay",
+    "start:local": "node scripts/dev-local.mjs --prod --passcode letmein",
+    "check:secrets": "node --env-file=.env.local scripts/check-secrets.mjs --bundle"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",

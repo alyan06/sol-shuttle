@@ -9,6 +9,7 @@ const PROBLEMS: Record<string, string> = {
   expired: 'That sign-in took too long. Try again.',
   failed: "Google couldn't confirm it was you. Try again.",
   unavailable: "Google sign-in isn't set up on this app yet.",
+  full: "The app isn't taking new accounts right now. Try again later.",
 };
 
 function GoogleLogo() {
@@ -31,7 +32,8 @@ export function SignInCard({ title = 'Make it yours' }: { title?: string }) {
 
   useEffect(() => {
     const problem = new URLSearchParams(window.location.search).get('signin');
-    if (problem) setMessage(PROBLEMS[problem] ?? null);
+    // Only the app's own words: a link with ?signin=constructor must not reach into the object's prototype.
+    if (problem && Object.hasOwn(PROBLEMS, problem)) setMessage(PROBLEMS[problem]);
   }, []);
 
   async function submitPasscode(event: FormEvent) {

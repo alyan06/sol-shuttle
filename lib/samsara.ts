@@ -35,6 +35,8 @@ function shareToken(): string {
 let session: { csrf: string; cookie: string } | null = null;
 let cache: { at: number; pings: Ping[] } | null = null;
 let inFlight: Promise<Ping[]> | null = null;
+/** A failed read is remembered as long as a good one, so a flood of requests during an outage can't hammer Samsara. */
+let failed: { at: number; error: unknown } | null = null;
 
 async function openSession() {
   const res = await fetch(`${HOST}/r/auth/csrf`, { headers: HEADERS, cache: 'no-store' });
@@ -87,10 +89,16 @@ async function load(): Promise<Ping[]> {
 export async function fetchPings(): Promise<Ping[]> {
   if (replaying()) return replayPings();
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.pings;
+  if (failed && Date.now() - failed.at < CACHE_MS) throw failed.error;
   inFlight ??= load()
     .then((pings) => {
       cache = { at: Date.now(), pings };
+      failed = null;
       return pings;
+    })
+    .catch((error: unknown) => {
+      failed = { at: Date.now(), error };
+      throw error;
     })
     .finally(() => {
       inFlight = null;

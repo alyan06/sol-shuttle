@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { OAUTH_COOKIE, appOrigin, clearCookie, finishOauth, googleConfigured, joinCodeRequired, sessionCookie } from '@/lib/auth.ts';
+import { OAUTH_COOKIE, accountIdFor, appOrigin, clearCookie, finishOauth, googleConfigured, joinCodeRequired, maxAccounts, sessionCookie } from '@/lib/auth.ts';
 import { googleClaimsProblem, readIdToken } from '@/lib/session.ts';
-import { ensureUser } from '@/lib/store.ts';
+import { countUsers, ensureUser, loadUser } from '@/lib/store.ts';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +49,13 @@ export async function GET(request: Request) {
     return fail('failed');
   }
 
-  const id = `g_${claims.sub.replace(/[^0-9a-z]/gi, '').toLowerCase()}`;
+  const id = accountIdFor(claims.sub);
+  // The background check plans for every account every 30 seconds, so a flood of throwaway Google
+  // accounts could slow alerts for everyone. Past the cap, new accounts wait; existing ones sign in.
+  if (!(await loadUser(id)) && (await countUsers()) >= maxAccounts()) {
+    console.error('sign-in refused: the account cap is reached');
+    return fail('full');
+  }
   await ensureUser({ id, email: claims.email ?? null, name: claims.name ?? null, joined: !joinCodeRequired() });
   const response = NextResponse.redirect(new URL('/', origin));
   response.headers.append('Set-Cookie', sessionCookie(request, id));
