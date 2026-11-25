@@ -232,12 +232,51 @@ describe('service limits', () => {
   });
 
   it('marks the last bus home', () => {
-    const p = plan(T(18, 5, 3), live(25), { day: 3, timetable: { ...ends7pm, weekday: 4 } });
-    // Buses reach Gammage 6:15 and 6:50. 6:50 gets home 7:05; the one after would be past the end.
+    // Buses reach Gammage 5:50 and 6:25; the one after that is past the last pickup.
+    const p = plan(T(17, 30, 3), live(0), { day: 3, timetable: { ...ends7pm, weekday: 4 } });
+    assert.equal(clock(leg(p, 'back').bus!.at), '5:50 PM');
     assert.equal(leg(p, 'back').lastBus, undefined);
-    const later = plan(T(18, 20, 3), live(10), { day: 3, timetable: { ...ends7pm, weekday: 4 } });
-    assert.equal(clock(leg(later, 'back').bus!.at), '6:50 PM');
+    const later = plan(T(18, 20, 3), live(35), { day: 3, timetable: { ...ends7pm, weekday: 4 } });
+    assert.equal(clock(leg(later, 'back').bus!.at), '6:40 PM');
     assert.equal(leg(later, 'back').lastBus, true);
+    assert.match(planAnswer(later, route, T(18, 20, 3))!.detail, /Last bus home today/);
+  });
+
+  describe('the last pickups (from the driver: 6:30 PM at SoL, 6:45 PM at Gammage)', () => {
+    it('holds even before the bus has been logged', () => {
+      // No timetable at all. The bus reaches Gammage 6:40; the next loop would be 7:15.
+      const p = plan(T(18, 20, 3), live(35), { day: 3 });
+      assert.equal(clock(leg(p, 'back').bus!.at), '6:40 PM');
+      assert.equal(leg(p, 'back').lastBus, true);
+      assert.match(p.service!, /Last pickups 6:30 PM at SoL and 6:45 PM at Gammage/);
+    });
+
+    it('plans no bus home from Gammage after 6:45 PM', () => {
+      // 6:50 PM, going home, 7 min from the stop. The bus would be back at Gammage at 7:00, but it isn't picking up then.
+      const now = T(18, 50, 3);
+      const p = plan(now, live(25), { day: 3, ov: { goNow: { to: 'home', at: now, walkMin: 7 } } });
+      const back = leg(p, 'back');
+      assert.equal(back.bus, undefined);
+      assert.equal(back.warn, 'The last pickup at Gammage is 6:45 PM.');
+      assert.equal(planAnswer(p, route, T(18, 50, 3))!.headline, 'No bus');
+    });
+
+    it('plans no bus to campus from SoL after 6:30 PM', () => {
+      const now = T(18, 40, 3);
+      const p = plan(now, live(10), { day: 3, ov: { goNow: { to: 'campus', at: now, walkMin: 5 } } });
+      const go = leg(p, 'go');
+      assert.equal(go.bus, undefined);
+      assert.equal(go.warn, 'The last pickup at SoL is 6:30 PM.');
+    });
+
+    it('marks the 6:30 bus as the last one to campus', () => {
+      const now = T(18, 0, 3);
+      const p = plan(now, live(20), { day: 3, ov: { goNow: { to: 'campus', at: now, walkMin: 5 } } });
+      const go = leg(p, 'go');
+      assert.equal(clock(go.bus!.at), '6:20 PM');
+      assert.equal(go.lastBus, true);
+      assert.match(planAnswer(p, route, now)!.detail, /Last bus to campus today/);
+    });
   });
 
   it('says there is no bus either way on a day the bus does not run', () => {

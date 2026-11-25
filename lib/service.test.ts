@@ -24,7 +24,7 @@ describe('when the bus runs', () => {
 
   it('says there is no bus on a weekend, and when the next one is', () => {
     const saturday = serviceState(T(10, 0, 5), null);
-    assert.deepEqual(saturday, { open: false, headline: 'No bus today', detail: 'The shuttle runs Monday to Friday, about 7:00 AM to 7:00 PM. The next bus is on Monday around 7:00 AM.' });
+    assert.deepEqual(saturday, { open: false, headline: 'No bus today', detail: 'The shuttle runs Monday to Friday from about 7:00 AM, last pickups 6:30 PM at SoL and 6:45 PM at Gammage. The next bus is on Monday around 7:00 AM.' });
     const sunday = serviceState(T(10, 0, 6), null);
     assert.equal(sunday.open, false);
     assert.match((sunday as { detail: string }).detail, /The next bus is tomorrow around 7:00 AM/);
@@ -37,7 +37,7 @@ describe('when the bus runs', () => {
     assert.deepEqual(serviceState(T(6, 50), null), { open: true });
     assert.deepEqual(serviceState(T(19, 10), null), { open: true });
     const evening = serviceState(T(21, 0, 4), null);
-    assert.deepEqual(evening, { open: false, headline: 'Done for today', detail: 'The last bus parks around 7:00 PM. The next bus is on Monday around 7:00 AM.' });
+    assert.deepEqual(evening, { open: false, headline: 'Done for today', detail: 'The last pickups are 6:30 PM at SoL and 6:45 PM at Gammage. The next bus is on Monday around 7:00 AM.' });
   });
 });
 
@@ -47,9 +47,21 @@ describe('slots for a one-off trip', () => {
   it('are quarter-hour windows inside the bus\'s hours, never the small hours', () => {
     const all = labels(T(3), 'arrive');
     assert.equal(all[0], '7:00 to 7:15 AM');
-    assert.equal(all.at(-1), '6:45 to 7:00 PM');
-    assert.equal(all.length, 48);
+    assert.equal(all.at(-1), '6:30 to 6:45 PM');
+    assert.equal(all.length, 47);
     assert.ok(all.includes('11:45 AM to 12:00 PM'));
+  });
+
+  it('stop at the last pickups: 6:30 PM at SoL, 6:45 PM at Gammage', () => {
+    // Leaving SoL in the 6:15 to 6:30 window still makes the 6:30 pickup; nothing later does.
+    assert.equal(labels(T(3), 'leave-home').at(-1), '6:15 to 6:30 PM');
+    // Getting to Gammage, or leaving campus, works up to its 6:45 pickup.
+    assert.equal(labels(T(3), 'leave-campus').at(-1), '6:30 to 6:45 PM');
+    assert.equal(labels(T(3), 'arrive').at(-1), '6:30 to 6:45 PM');
+    // A log that says the bus stops earlier on some day still wins.
+    assert.equal(tripSlots(T(3), 'leave-campus', { runs: true, firstSec: null, lastSec: 17 * 3600 }).at(-1)!.label, '4:45 to 5:00 PM');
+    // At 6:40 PM there's no leaving SoL by bus, but leaving campus still is.
+    assert.deepEqual(labels(T(18, 40), 'leave-home'), []);
   });
 
   it('offer nothing that has already gone', () => {
