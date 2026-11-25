@@ -1,4 +1,5 @@
 import { canCatch, parkedUp } from './alerts.ts';
+import { LAST_PICKUP_GRACE_MS, lastPickupAt } from './service.ts';
 import { formatClock, formatSince, tempeDayKey, tempeWeekday } from './time.ts';
 import type { FeedStatus, Prefs, Route, StopEta } from './types.ts';
 
@@ -75,8 +76,20 @@ export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSi
   // On other streets than usual the time comes from distance alone, and says so.
   const around = eta.rough ? 'roughly' : 'around';
   const roughNote = eta.rough ? ' The bus is taking a different route, so this is a rough time.' : '';
+
+  // The driver's last pickups (6:30 PM at SoL, 6:45 PM at Gammage): a bus after that isn't stopping for anyone.
+  const arrivesAt = eta.atStop ? now : now + eta.seconds * 1000;
+  const pickup = lastPickupAt(now, stop.id);
+  const pastPickup = (at: number) => pickup !== null && at > pickup + LAST_PICKUP_GRACE_MS;
+  if (pastPickup(arrivesAt)) {
+    return { tone: 'unknown', lead: `From ${stop.name}`, headline: 'No more pickups', detail: `The last pickup at ${stop.name} is ${formatClock(pickup!)}, so there are no more buses from here today.` };
+  }
+  const lastOne = pastPickup(arrivesAt + route.loopSeconds * 1000);
+  const lastNote = lastOne ? ` It's the last pickup here today (${formatClock(pickup!)}).` : '';
+
   if (eta.atStop) {
-    return { tone: 'here', lead: `At ${stop.name}`, headline: 'Bus is here', detail: `If you miss it, the next one is about ${minutes(route.loopSeconds)} min later.` };
+    const next = lastOne ? `This is the last pickup here today (${formatClock(pickup!)}).` : `If you miss it, the next one is about ${minutes(route.loopSeconds)} min later.`;
+    return { tone: 'here', lead: `At ${stop.name}`, headline: 'Bus is here', detail: next };
   }
 
   // Same lead time as the push alert, so the screen and the phone never disagree.
@@ -86,6 +99,9 @@ export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSi
   const walkText = `${prefs.walkMinutes} min walk, ${prefs.bufferMinutes} min spare`;
 
   if (!canCatch(eta.seconds, stop, prefs)) {
+    if (lastOne) {
+      return { tone: 'unknown', lead: `From ${stop.name}`, headline: 'Too late', detail: `The last bus reaches ${stop.name} ${around} ${arrival}, too soon to make with a ${prefs.walkMinutes} min walk. The last pickup here is ${formatClock(pickup!)}.` };
+    }
     const nextLeave = leaveIn + route.loopSeconds;
     return {
       tone: 'calm',
@@ -95,7 +111,7 @@ export function answerFor({ route, prefs, status, eta, now, lastSeenAt, parkedSi
     };
   }
   if (leaveIn <= NOW_WINDOW_SECONDS) {
-    return { tone: 'go', lead: `Bus reaches ${stop.name} ${around} ${arrival}`, headline: 'Leave now', detail: `${walkText}.${roughNote}` };
+    return { tone: 'go', lead: `Bus reaches ${stop.name} ${around} ${arrival}`, headline: 'Leave now', detail: `${walkText}.${lastNote}${roughNote}` };
   }
-  return { tone: 'calm', lead: 'Leave in', headline: `${minutes(leaveIn)} min`, detail: `Bus reaches ${stop.name} ${around} ${arrival}. ${walkText}.${roughNote}` };
+  return { tone: 'calm', lead: 'Leave in', headline: `${minutes(leaveIn)} min`, detail: `Bus reaches ${stop.name} ${around} ${arrival}. ${walkText}.${lastNote}${roughNote}` };
 }

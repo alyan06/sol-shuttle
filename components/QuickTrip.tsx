@@ -49,7 +49,7 @@ export default function QuickTrip({ now, timetable, count, onAdd }: Props) {
       <section className="panel quick" aria-labelledby="quick-title">
         <div>
           <h2 id="quick-title">Plan a trip today</h2>
-          <p className="note">{service.open ? 'The bus is on its last loop, so there is nothing left to plan for today.' : `${service.headline}. ${service.detail}`}</p>
+          <p className="note">{service.open ? 'The last pickups today are 6:30 PM at SoL and 6:45 PM at Gammage, so there is nothing left to plan.' : `${service.headline}. ${service.detail}`}</p>
         </div>
       </section>
     );

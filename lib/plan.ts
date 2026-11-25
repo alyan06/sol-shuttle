@@ -1,5 +1,5 @@
 import { CAMPUS, CAMPUS_WALK_DEFAULT_MIN, HOME, allPlaces, classesOn, walkMinutes } from './schedule.ts';
-import { tripWindow } from './service.ts';
+import { LAST_PICKUP_SEC, runsOn, tripWindow } from './service.ts';
 import { formatClock, tempeDayKey, tempeMidnight, tempeWeekday } from './time.ts';
 import type {
   ClassBlock,
@@ -22,6 +22,7 @@ const LEAVE_GRACE_MS = 75_000;
 const ROUGH_EXTRA_S = 180;
 /** Each loop further ahead adds this much doubt to a time worked out from the loop length. */
 const DRIFT_PER_LOOP_S = 180;
+/** A bus this far past the last pickup (or the time it parks) is still that last bus running behind. */
 const SERVICE_SLACK_MS = 5 * MIN;
 /** Bus-home alerts for a class begin this long before it ends. */
 const WATCH_LEAD_MS = 15 * MIN;
@@ -146,6 +147,8 @@ type Ctx = PlanInput & {
   boarded: Progress['boarded'];
   /** When the bus parks for the night, if known. */
   lastMs: number | null;
+  /** The last pickup at each end today, a fixed rule from the driver. */
+  pickup: { home: number; campus: number };
   walk: (from: string, to: string) => number;
   name: (placeId: string) => string;
 };
@@ -228,9 +231,15 @@ function goingDone(ctx: Ctx, id: string, going: GoNow | undefined): Progress['bo
   return done;
 }
 
-function noBusReason(ctx: Ctx, tooLate: boolean): string | null {
+/**
+ * Why no bus can be planned. `reach` is when they'd get to the stop: after its last pickup, that's
+ * the reason. `pastPark` is the learned end of the day, for a day the bus finishes early.
+ */
+function noBusReason(ctx: Ctx, stop: Stop, reach: number, pastPark: boolean): string | null {
   if (ctx.timetable?.runs === false) return `No bus on ${DAY_NAMES[ctx.timetable.weekday]}s.`;
-  if (ctx.lastMs !== null && tooLate) return `The bus finishes around ${formatClock(ctx.lastMs)}.`;
+  const pickup = stop.id === HOME ? ctx.pickup.home : ctx.pickup.campus;
+  if (reach > pickup) return `The last pickup at ${stop.name} is ${formatClock(pickup)}.`;
+  if (ctx.lastMs !== null && pastPark) return `The bus finishes around ${formatClock(ctx.lastMs)}.`;
   return null;
 }
 
@@ -254,8 +263,9 @@ function outbound(
   }
 
   const earliest = Math.max(o.readyAt, now);
-  // The last loop leaves SoL about one trip-home's worth before the bus parks.
-  const lastBoard = ctx.lastMs === null ? Infinity : ctx.lastMs - home.t * 1000 + SERVICE_SLACK_MS;
+  // The last loop leaves SoL about one trip-home's worth before the bus parks, and never after SoL's last pickup.
+  const parkBoard = ctx.lastMs === null ? Infinity : ctx.lastMs - home.t * 1000 + SERVICE_SLACK_MS;
+  const lastBoard = Math.min(parkBoard, ctx.pickup.home + SERVICE_SLACK_MS);
   const going = o.going;
   const options = busTimes(ctx, HOME)
     .filter((bus) => bus.at <= lastBoard)
@@ -273,12 +283,14 @@ function outbound(
   const pick = going || o.deadline === null ? options[0] : beyondView ? undefined : (latest ?? options[0]);
 
   if (!pick && going) {
-    const reason = noBusReason(ctx, going.at + walkHome * MIN > lastBoard);
+    const reach = going.at + walkHome * MIN;
+    const reason = noBusReason(ctx, home, reach, reach > parkBoard);
     if (reason) return { legs: [{ ...base, start: null, end: null, notBefore: going.at, warn: reason }], arrive: null };
     return { legs: [{ ...base, start: null, end: null, notBefore: going.at, note: ctx.live?.parked ? NOTE_BREAK : NOTE_SILENT }], arrive: null };
   }
   if (!pick) {
-    const reason = beyondView ? null : noBusReason(ctx, earliest + walkHome * MIN > lastBoard);
+    const reach = earliest + walkHome * MIN;
+    const reason = beyondView ? null : noBusReason(ctx, home, reach, reach > parkBoard);
     // Nobody walks it, so with no bus the leg just says so, and why.
     if (reason) return { legs: [{ ...base, start: null, end: null, notBefore: o.walkBy ?? o.readyAt, warn: reason }], arrive: null };
     const notBefore = o.deadline === null ? o.readyAt : o.deadline - ride - walkHome * MIN - loop;
@@ -290,11 +302,14 @@ function outbound(
   const inRoom = late ? pick.arrive + (o.walkBy! - o.deadline!) : 0;
   // On time if nothing slips is "tight"; after the class has begun is "late".
   const verdict = late && o.startsAt !== undefined && inRoom <= o.startsAt ? `Tight for ${o.goal}` : `Late for ${o.goal}`;
+  // The last bus to campus: nothing later is known, and one loop on would be past SoL's last pickup.
+  const lastBus = pick === options.at(-1) && pick.bus.at + loop > lastBoard;
   const leg: Leg = {
     ...base,
     start: pick.leaveAt,
     end: pick.arrive,
     bus: { ...pick.bus, stopId: HOME, arrive: pick.arrive },
+    ...(lastBus ? { lastBus: true } : {}),
     ...(late ? { warn: `${verdict}: ${o.visit ? 'there' : 'in the room'} around ${formatClock(inRoom)}.` } : {}),
     ...(going ? { note: goingNote(pick.bus, home, going) } : {}),
   };
@@ -308,7 +323,7 @@ function homeBuses(ctx: Ctx, readyAt: number, walkToStop: number, going?: GoNow)
   const earliest = Math.max(readyAt, ctx.now);
   const lastHome = ctx.lastMs === null ? Infinity : ctx.lastMs + SERVICE_SLACK_MS;
   return busTimes(ctx, CAMPUS)
-    .filter((bus) => bus.at + ride <= lastHome)
+    .filter((bus) => bus.at <= ctx.pickup.campus + SERVICE_SLACK_MS && bus.at + ride <= lastHome)
     .map((bus) => ({ bus, leaveAt: going ? going.at : beThereBy(bus, ctx.campus) - walkToStop * MIN, arrive: bus.at + ride }))
     .filter((x) => (going ? reachableOnTheWay(x.bus, ctx.campus, going) : x.leaveAt >= earliest - LEAVE_GRACE_MS));
 }
@@ -333,7 +348,8 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number; walk
   const pick = options[0];
 
   if (!pick) {
-    const reason = noBusReason(ctx, earliest + walkToStop * MIN + ride > lastHome);
+    const reach = earliest + walkToStop * MIN;
+    const reason = noBusReason(ctx, campus, reach, reach + ride > lastHome);
     if (reason) return { legs: [{ ...base, start: null, end: null, notBefore: o.readyAt, warn: reason }], arrive: null };
     const atLeast = earliest + walkToStop * MIN + ride + walkHome * MIN;
     const note = ctx.live?.parked ? NOTE_BREAK : o.going || o.readyAt <= now + 5 * MIN ? NOTE_SILENT : NOTE_LATER;
@@ -341,7 +357,9 @@ function homeward(ctx: Ctx, o: { id: string; from: string; readyAt: number; walk
   }
 
   const end = pick.arrive + walkHome * MIN;
-  const lastBus = ctx.lastMs !== null && options.length === 1 && pick.bus.at + route.loopSeconds * 1000 + ride > lastHome;
+  // The last bus home: one loop on would be past Gammage's last pickup, or home after the bus parks.
+  const lastCatch = Math.min(ctx.pickup.campus + SERVICE_SLACK_MS, lastHome - ride);
+  const lastBus = options.length === 1 && pick.bus.at + route.loopSeconds * 1000 > lastCatch;
   const leg: Leg = {
     ...base,
     start: pick.leaveAt,
@@ -389,6 +407,7 @@ export function planDay(input: PlanInput): DayPlan {
     campus,
     boarded: {},
     lastMs: timetable?.lastSec == null ? null : midnight + timetable.lastSec * 1000,
+    pickup: { home: midnight + LAST_PICKUP_SEC[HOME] * 1000, campus: midnight + LAST_PICKUP_SEC[CAMPUS] * 1000 },
     walk: (from, to) => walkMinutes(schedule, places, from, to),
     name: (id) => places.find((p) => p.id === id)?.name ?? 'campus',
   };
@@ -410,7 +429,7 @@ export function planDay(input: PlanInput): DayPlan {
     }
   }
   if (timetable?.runs === false) plan.service = `No bus on ${DAY_NAMES[weekday]}s${timetable.daysSeen >= 2 ? `, going by the last ${timetable.daysSeen}` : ''}.`;
-  else if (ctx.lastMs !== null) plan.service = `Last bus parks around ${formatClock(ctx.lastMs)}${timetable?.lastSure ? '' : ' (seen once)'}.`;
+  else if (runsOn(weekday, timetable)) plan.service = `Last pickups ${formatClock(ctx.pickup.home)} at ${home.name} and ${formatClock(ctx.pickup.campus)} at ${campus.name}.`;
 
   // The last thing on campus is whatever ends last, which needn't be what starts last.
   const last = taken.reduce<ClassBlock | null>((latest, c) => (latest === null || endOf(c) >= endOf(latest) ? c : latest), null);
@@ -580,6 +599,12 @@ function about(bus: BusTime): string {
   return bus.source === 'live' ? 'around' : 'roughly';
 }
 
+/** Said with the day's last bus, in the direction it goes. Empty for any other. */
+export function lastBusNote(leg: Leg): string {
+  if (!leg.lastBus || !leg.bus) return '';
+  return leg.bus.stopId === HOME ? ' Last bus to campus today.' : ' Last bus home today.';
+}
+
 /** One line on a bus leg: where the bus is caught and where it gets you. */
 export function busLine(leg: Leg, route: Route): string {
   if (!leg.bus) return leg.note ?? '';
@@ -595,8 +620,7 @@ export type PlanAlert = { id: string; title: string; body: string };
 export function leaveAlert(leg: Leg, route: Route): PlanAlert {
   const origin = leg.bus!.stopId === HOME ? 'Leave home now' : 'Head to the bus now';
   const walk = leg.walkMin ? ` ${leg.walkMin} min walk to the stop.` : '';
-  const last = leg.lastBus ? ' This is the last bus today.' : '';
-  return { id: leg.id, title: leg.goal && leg.goal !== 'Home' ? `${origin} for ${leg.goal}` : origin, body: `${busLine(leg, route)}${walk}${last}` };
+  return { id: leg.id, title: leg.goal && leg.goal !== 'Home' ? `${origin} for ${leg.goal}` : origin, body: `${busLine(leg, route)}${walk}${lastBusNote(leg)}` };
 }
 
 /**
@@ -679,7 +703,7 @@ export function planAnswer(plan: DayPlan, route: Route, now: number): PlanAnswer
       }
       return { tone: 'unknown', lead: leg.title, headline: 'No time yet', detail };
     }
-    const line = `${busLine(leg, route)}${leg.lastBus ? ' Last bus today.' : ''}${leg.warn ? ` ${leg.warn}` : ''}`;
+    const line = `${busLine(leg, route)}${lastBusNote(leg)}${leg.warn ? ` ${leg.warn}` : ''}`;
     if (leg.going && !leg.committed) {
       // On the way to the stop, or at it: what matters is how long until the bus gets there.
       const stop = route.stops.find((s) => s.id === leg.bus!.stopId)?.name ?? 'the stop';

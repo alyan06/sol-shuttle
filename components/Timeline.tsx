@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { busLine, type DayPlan, type Leg } from '@/lib/plan.ts';
+import { busLine, lastBusNote, type DayPlan, type Leg } from '@/lib/plan.ts';
 import { formatClock } from '@/lib/time.ts';
 import type { DayOverride, Route, Schedule } from '@/lib/types.ts';
 
@@ -42,7 +42,7 @@ const ICONS: Record<Leg['kind'], React.ReactNode> = {
 function detail(leg: Leg, route: Route): string {
   if (leg.kind === 'bus') {
     const stop = leg.bus && leg.walkMin ? ` ${leg.walkMin} min walk to the stop.` : '';
-    return `${busLine(leg, route)}${stop}${leg.lastBus ? ' Last bus today.' : ''}`;
+    return `${busLine(leg, route)}${stop}${lastBusNote(leg)}`;
   }
   if (leg.kind === 'walk') return `${leg.walkMin} min, there by ${formatClock(leg.end!)}.`;
   const where = [leg.place, leg.room].filter(Boolean).join(', ');

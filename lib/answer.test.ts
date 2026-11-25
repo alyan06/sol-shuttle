@@ -100,3 +100,37 @@ describe('answerFor', () => {
     assert.match(a.detail, /2:00/);
   });
 });
+
+describe('the last pickups (6:30 PM at SoL, from the driver)', () => {
+  const sol: Route = { ...route, stops: [{ ...route.stops[0], id: 'sol' }] };
+  // November 6, 2026 in Tempe (UTC-7).
+  const at = (hour: number, minute: number) => Date.UTC(2026, 10, 6, hour + 7, minute);
+  const askSol = (now: number, seconds: number, atStop = false) =>
+    answerFor({ route: sol, prefs: { ...prefs, stopId: 'sol' }, status: 'live', eta: { stopId: 'sol', seconds, atStop }, now, lastSeenAt: now, parkedSince: null, onRoute: true });
+
+  it('never sends anyone for a bus after the last pickup', () => {
+    // 6:50 PM, the bus back at SoL around 7:03: it's going to park, not picking up.
+    const a = askSol(at(18, 50), 13 * 60);
+    assert.deepEqual([a.headline, a.detail], ['No more pickups', 'The last pickup at SoL is 6:30 PM, so there are no more buses from here today.']);
+    assert.equal(askSol(at(18, 50), 0, true).headline, 'No more pickups');
+  });
+
+  it('says when the bus coming is the last one', () => {
+    // 6:10 PM, the bus at SoL around 6:25; one loop later would be 6:55.
+    const a = askSol(at(18, 10), 15 * 60);
+    assert.equal(a.tone, 'calm');
+    assert.match(a.detail, /It's the last pickup here today \(6:30 PM\)/);
+    assert.match(askSol(at(18, 25), 0, true).detail, /This is the last pickup here today/);
+  });
+
+  it('says it is too late rather than pointing at a next bus that will not come', () => {
+    const a = askSol(at(18, 25), 60);
+    assert.equal(a.headline, 'Too late');
+    assert.match(a.detail, /last pickup here is 6:30 PM/);
+  });
+
+  it('leaves earlier buses alone', () => {
+    assert.doesNotMatch(askSol(at(17, 0), 15 * 60).detail, /last pickup/);
+    assert.match(askSol(at(17, 0), 60).lead, /For the next bus/);
+  });
+});
